@@ -152,17 +152,17 @@ test "early-hint extension round-trips through the TestClient" {
 }
 
 ///|
-/// Per-subprotocol spec_version defaults: http and websocket scopes carry `2.4`,
+/// Per-subprotocol spec_version defaults: http and websocket scopes carry `2.5`,
 /// a lifespan scope carries `2.0`, and each is reachable via the typed
 /// constructors.
 test "per-subprotocol asgi spec_version defaults" {
-  assert_eq(AsgiVersion::http().spec_version, "2.4")
-  assert_eq(AsgiVersion::websocket().spec_version, "2.4")
+  assert_eq(AsgiVersion::http().spec_version, "2.5")
+  assert_eq(AsgiVersion::websocket().spec_version, "2.5")
   assert_eq(AsgiVersion::lifespan().spec_version, "2.0")
   assert_eq(LifespanScope::new().asgi.spec_version, "2.0")
   assert_eq(
     HttpScope::new(http_method="GET", path="/").asgi.spec_version,
-    "2.4",
+    "2.5",
   )
-  assert_eq(WebSocketScope::new(path="/").asgi.spec_version, "2.4")
+  assert_eq(WebSocketScope::new(path="/").asgi.spec_version, "2.5")
 }

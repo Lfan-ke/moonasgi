@@ -19,26 +19,28 @@ pub(all) struct AsgiVersion {
 } derive(Eq)
 
 ///|
-/// The default ASGI handshake: protocol `3.0`, sub-spec `2.4` (the current
-/// HTTP / WebSocket spec revision). An alias of `http` — the common case.
+/// The default ASGI handshake: protocol `3.0`, sub-spec `2.5` (the current
+/// HTTP / WebSocket spec revision, 2024-06-05). An alias of `http` — the common
+/// case.
 pub fn AsgiVersion::default() -> AsgiVersion {
   AsgiVersion::http()
 }
 
 ///|
-/// The HTTP handshake: protocol `3.0`, HTTP sub-spec `2.4` (the revision that
-/// carries `state`, the `http.response.trailers` / `http.response.pathsend` /
-/// `http.response.early_hint` extensions and the `raw_path` guarantee).
+/// The HTTP handshake: protocol `3.0`, HTTP sub-spec `2.5`. This is the revision
+/// that carries `state`, the extension message set (`http.response.trailers` /
+/// `http.response.push` / `http.response.pathsend` / `http.response.early_hint`),
+/// and the `raw_path` guarantee.
 pub fn AsgiVersion::http() -> AsgiVersion {
-  { version: "3.0", spec_version: "2.4" }
+  { version: "3.0", spec_version: "2.5" }
 }
 
 ///|
-/// The WebSocket handshake: protocol `3.0`, WebSocket sub-spec `2.4` (the
-/// revision that carries `state` and the `websocket.http.response` denial
-/// extension).
+/// The WebSocket handshake: protocol `3.0`, WebSocket sub-spec `2.5` — the
+/// revision that adds `reason` to the disconnect event, alongside `state` and the
+/// `websocket.http.response` denial extension.
 pub fn AsgiVersion::websocket() -> AsgiVersion {
-  { version: "3.0", spec_version: "2.4" }
+  { version: "3.0", spec_version: "2.5" }
 }
 
 ///|
@@ -308,8 +310,8 @@ pub fn LifespanScope::new(
 /// A protocol event flowing between server and application. Replaces ASGI's
 /// stringly-typed message dicts with a typed sum covering the http / websocket /
 /// lifespan message sets in both directions, including the standard extension
-/// messages (server push, path-send, response trailers, and WebSocket denial
-/// with a full HTTP response).
+/// messages (server push, path-send, zero-copy send, response trailers, early
+/// hints, debug, and WebSocket denial with a full HTTP response).
 pub(all) enum Event {
   HttpRequest(body~ : Bytes, more_body~ : Bool)
   HttpDisconnect
@@ -330,13 +332,29 @@ pub(all) enum Event {
   // `http.response.pathsend` extension: hand a file `path` to the server to
   // serve zero-copy, emitted after `HttpResponseStart`.
   HttpResponsePathSend(path~ : String)
+  // `http.response.zerocopysend` extension: hand an open file descriptor to the
+  // server to send zero-copy, from `offset` for `count` bytes (both optional —
+  // `None` means "from the current position" / "to end of file"), emitted after
+  // `HttpResponseStart`. `more_body` chains further body/zerocopysend messages.
+  HttpResponseZeroCopySend(
+    fd~ : Int,
+    offset~ : Int?,
+    count~ : Int?,
+    more_body~ : Bool
+  )
+  // `http.response.debug` extension: an out-of-band `info` map a server may log
+  // or surface in a debug UI. Carries no protocol meaning and is valid at any
+  // point in the response.
+  HttpResponseDebug(info~ : Json)
   // `http.response.early_hint` extension: a `103 Early Hints` informational
   // response carrying `Link` header values, emitted before `HttpResponseStart`.
   // May be sent repeatedly; each message is its own 103 response.
   HttpResponseEarlyHint(links~ : Array[String])
   WebSocketConnect
   WebSocketReceive(text~ : String?, bytes~ : Bytes?)
-  WebSocketDisconnect(code~ : Int)
+  // ASGI 2.5 added `reason` to the disconnect event: the close reason the peer
+  // sent, or `None` when it sent none (the code then defaults to `1005`).
+  WebSocketDisconnect(code~ : Int, reason~ : String?)
   WebSocketAccept(subprotocol~ : String?, headers~ : Array[(String, String)])
   WebSocketSendText(String)
   WebSocketSendBytes(Bytes)

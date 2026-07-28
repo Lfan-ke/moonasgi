@@ -28,10 +28,17 @@ fn all_event_variants() -> Array[Event] {
     HttpResponseTrailers(headers=[("t", "v")], more_trailers=false),
     HttpResponsePush(path="/p", headers=[]),
     HttpResponsePathSend(path="/f"),
+    HttpResponseZeroCopySend(
+      fd=7,
+      offset=Some(0),
+      count=Some(16),
+      more_body=false,
+    ),
+    HttpResponseDebug(info={ "trace": "abc" }.to_json()),
     HttpResponseEarlyHint(links=["</a>; rel=preload"]),
     WebSocketConnect,
     WebSocketReceive(text=Some("hi"), bytes=None),
-    WebSocketDisconnect(code=1000),
+    WebSocketDisconnect(code=1000, reason=Some("bye")),
     WebSocketAccept(subprotocol=Some("chat"), headers=[]),
     WebSocketSendText("hi"),
     WebSocketSendBytes(b"hi"),
@@ -51,9 +58,12 @@ fn all_event_variants() -> Array[Event] {
 /// Run the ASGI 3.0 conformance harness: a table-driven battery that drives every
 /// `Event` variant and every `Scope` field through `run_http`, `ws_run`, and the
 /// `TestClient`, asserting round-trip fidelity — a value put in comes back
-/// unchanged, and no two distinct events or scope shapes are confused. Returns a
-/// `ConformanceReport` naming any check that failed, so the suite (and any
-/// downstream server) can assert `ok()`.
+/// unchanged, and no two distinct events or scope shapes are confused — and a
+/// negative table that asserts `validate_events` rejects every malformed ordering
+/// (a body before the response starts, a websocket frame before the handshake, a
+/// lifespan shutdown reply before startup, and the rest) with the exact
+/// violation. Returns a `ConformanceReport` naming any check that failed, so the
+/// suite (and any downstream server) can assert `ok()`.
 pub fn run_conformance() -> ConformanceReport {
   let results : Array[(String, Bool)] = []
   let check = fn(name : String, cond : Bool) -> Unit {
@@ -61,9 +71,9 @@ pub fn run_conformance() -> ConformanceReport {
   }
 
   // A. every Event variant is self-equal and pairwise-distinct: derived equality
-  //    discriminates all 23 messages, so none collapses into another.
+  //    discriminates all 25 messages, so none collapses into another.
   let evs = all_event_variants()
-  check("event/count", evs.length() == 23)
+  check("event/count", evs.length() == 25)
   for i in 0..<evs.length() {
     check("event/self-eq[" + i.to_string() + "]", evs[i] == evs[i])
     for j in (i + 1)..<evs.length() {
@@ -161,7 +171,7 @@ pub fn run_conformance() -> ConformanceReport {
     hs.client == Some(("1.2.3.4", 5)) &&
     hs.server == Some(("9.8.7.6", 4)) &&
     hs.extensions.http_response_push &&
-    hs.asgi.spec_version == "2.4",
+    hs.asgi.spec_version == "2.5",
   )
   let wss = WebSocketScope::new(
     path="/ws",
@@ -185,7 +195,7 @@ pub fn run_conformance() -> ConformanceReport {
     wss.server == Some(("s", 2)) &&
     wss.subprotocols == ["chat", "json"] &&
     wss.extensions.websocket_http_response &&
-    wss.asgi.spec_version == "2.4",
+    wss.asgi.spec_version == "2.5",
   )
   let ls = LifespanScope::new(state=Map([("boot", true.to_json())]))
   check(
@@ -315,11 +325,11 @@ pub fn run_conformance() -> ConformanceReport {
 
   // H. spec_version negotiation compares numerically across the dotted version.
   let ver_cases : Array[(String, Int, Int, Bool)] = [
-    ("2.4", 2, 0, true),
-    ("2.4", 2, 4, true),
-    ("2.4", 2, 5, false),
-    ("2.4", 1, 9, true),
-    ("2.4", 3, 0, false),
+    ("2.5", 2, 0, true),
+    ("2.5", 2, 5, true),
+    ("2.5", 2, 6, false),
+    ("2.5", 1, 9, true),
+    ("2.5", 3, 0, false),
     ("2.10", 2, 9, true),
     ("2.0", 2, 0, true),
     ("2.0", 2, 1, false),
@@ -331,6 +341,152 @@ pub fn run_conformance() -> ConformanceReport {
       "spec_version/" + sv + ">=" + maj.to_string() + "." + minr.to_string(),
       v.at_least(major=maj, minor=minr) == want,
     )
+  }
+  // I. event-ordering validation. A well-formed outbound stream passes
+  //    `validate_events`; a malformed one is rejected with the exact violation.
+  //    This is the negative half of the harness — the ordering rules ASGI pins.
+  let hscope = Http(HttpScope::new(http_method="GET", path="/"))
+  let wscope = WebSocket(WebSocketScope::new(path="/ws"))
+  let lscope = Lifespan(LifespanScope::new())
+  let ok_start = HttpResponseStart(status=200, headers=[], trailers=false)
+  let ok_start_tr = HttpResponseStart(status=200, headers=[], trailers=true)
+  let ok_body = HttpResponseBody(body=b"x", more_body=false)
+  let ok_trailers = HttpResponseTrailers(
+    headers=[("t", "v")],
+    more_trailers=false,
+  )
+  let valid_http : Array[(String, Array[Event])] = [
+    ("start+body", [ok_start, ok_body]),
+    (
+      "hint+start+body",
+      [HttpResponseEarlyHint(links=["</a>"]), ok_start, ok_body],
+    ),
+    ("start+body+trailers", [ok_start_tr, ok_body, ok_trailers]),
+    (
+      "start+zerocopy",
+      [
+        ok_start,
+        HttpResponseZeroCopySend(fd=3, offset=None, count=None, more_body=false),
+      ],
+    ),
+    ("start+pathsend", [ok_start, HttpResponsePathSend(path="/f")]),
+    (
+      "push+start+body",
+      [HttpResponsePush(path="/p", headers=[]), ok_start, ok_body],
+    ),
+    (
+      "start+debug+body",
+      [ok_start, HttpResponseDebug(info={ "k": "v" }.to_json()), ok_body],
+    ),
+  ]
+  for vc in valid_http {
+    check("order/http-valid/" + vc.0, validate_events(hscope, vc.1) == None)
+  }
+  let bad_http : Array[(String, Array[Event], EventOrderError)] = [
+    ("body-before-start", [ok_body], BodyBeforeStart),
+    ("dup-start", [ok_start, ok_start], DuplicateResponseStart),
+    (
+      "hint-after-start",
+      [ok_start, HttpResponseEarlyHint(links=[])],
+      EarlyHintAfterStart,
+    ),
+    ("body-after-complete", [ok_start, ok_body, ok_body], BodyAfterComplete),
+    (
+      "unexpected-trailers",
+      [ok_start, ok_body, ok_trailers],
+      UnexpectedTrailers,
+    ),
+    ("trailers-before-body", [ok_start_tr, ok_trailers], TrailersBeforeBody),
+    ("missing-start", [], MissingResponseStart),
+    (
+      "incomplete-body",
+      [ok_start, HttpResponseBody(body=b"x", more_body=true)],
+      IncompleteBody,
+    ),
+    ("missing-trailers", [ok_start_tr, ok_body], MissingTrailers),
+    (
+      "event-after-complete",
+      [ok_start, ok_body, HttpResponsePush(path="/p", headers=[])],
+      EventAfterComplete,
+    ),
+    ("non-response-event", [WebSocketConnect], NonResponseEvent),
+  ]
+  for bc in bad_http {
+    check("order/http-bad/" + bc.0, validate_events(hscope, bc.1) == Some(bc.2))
+  }
+  let ws_accept = WebSocketAccept(subprotocol=None, headers=[])
+  let ws_deny_start = WebSocketHttpResponseStart(status=403, headers=[])
+  let valid_ws : Array[(String, Array[Event])] = [
+    ("accept", [ws_accept]),
+    (
+      "accept+send+close",
+      [ws_accept, WebSocketSendText("hi"), WebSocketClose(code=1000, reason="")],
+    ),
+    ("close", [WebSocketClose(code=1003, reason="no")]),
+    (
+      "deny",
+      [ws_deny_start, WebSocketHttpResponseBody(body=b"no", more_body=false)],
+    ),
+  ]
+  for vc in valid_ws {
+    check("order/ws-valid/" + vc.0, validate_events(wscope, vc.1) == None)
+  }
+  let bad_ws : Array[(String, Array[Event], EventOrderError)] = [
+    ("frame-before-accept", [WebSocketSendText("x")], FrameBeforeAccept),
+    ("dup-accept", [ws_accept, ws_accept], DuplicateAccept),
+    (
+      "event-after-close",
+      [WebSocketClose(code=1000, reason=""), WebSocketSendText("x")],
+      EventAfterClose,
+    ),
+    (
+      "denial-body-before-start",
+      [WebSocketHttpResponseBody(body=b"", more_body=false)],
+      DenialBodyBeforeStart,
+    ),
+    ("deny-after-accept", [ws_accept, ws_deny_start], DenialAfterAccept),
+    ("accept-after-deny", [ws_deny_start, ws_accept], AcceptAfterDenial),
+    ("incomplete-denial", [ws_deny_start], IncompleteDenial),
+    ("missing-reply", [], MissingHandshakeReply),
+  ]
+  for bc in bad_ws {
+    check("order/ws-bad/" + bc.0, validate_events(wscope, bc.1) == Some(bc.2))
+  }
+  let valid_ls : Array[(String, Array[Event])] = [
+    ("startup+shutdown", [LifespanStartupComplete, LifespanShutdownComplete]),
+    ("startup-failed", [LifespanStartupFailed(message="boom")]),
+    (
+      "shutdown-failed",
+      [LifespanStartupComplete, LifespanShutdownFailed(message="x")],
+    ),
+  ]
+  for vc in valid_ls {
+    check("order/ls-valid/" + vc.0, validate_events(lscope, vc.1) == None)
+  }
+  let bad_ls : Array[(String, Array[Event], EventOrderError)] = [
+    (
+      "shutdown-before-startup",
+      [LifespanShutdownComplete],
+      ShutdownBeforeStartup,
+    ),
+    (
+      "dup-startup",
+      [LifespanStartupComplete, LifespanStartupComplete],
+      DuplicateLifespanReply,
+    ),
+    (
+      "reply-after-cycle",
+      [
+        LifespanStartupComplete,
+        LifespanShutdownComplete,
+        LifespanShutdownComplete,
+      ],
+      DuplicateLifespanReply,
+    ),
+    ("non-response-event", [HttpDisconnect], NonResponseEvent),
+  ]
+  for bc in bad_ls {
+    check("order/ls-bad/" + bc.0, validate_events(lscope, bc.1) == Some(bc.2))
   }
   let failures : Array[String] = []
   for r in results {

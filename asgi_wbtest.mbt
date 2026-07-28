@@ -213,9 +213,17 @@ test "SEAM scope and event variants construct" {
     Event::HttpResponseTrailers(headers=[("digest", "x")], more_trailers=false),
     Event::HttpResponsePush(path="/style.css", headers=[]),
     Event::HttpResponsePathSend(path="/var/www/index.html"),
+    Event::HttpResponseZeroCopySend(
+      fd=9,
+      offset=Some(0),
+      count=None,
+      more_body=false,
+    ),
+    Event::HttpResponseDebug(info={ "phase": "test" }.to_json()),
+    Event::HttpResponseEarlyHint(links=["</a.css>; rel=preload"]),
     Event::WebSocketConnect,
     Event::WebSocketReceive(text=Some("hi"), bytes=None),
-    Event::WebSocketDisconnect(code=1000),
+    Event::WebSocketDisconnect(code=1000, reason=Some("bye")),
     Event::WebSocketAccept(subprotocol=None, headers=[]),
     Event::WebSocketSendText("hi"),
     Event::WebSocketSendBytes(b"hi"),
@@ -229,7 +237,8 @@ test "SEAM scope and event variants construct" {
     Event::LifespanShutdownComplete,
     Event::LifespanShutdownFailed(message="boom"),
   ]
-  assert_eq(events.length(), 22)
+  // Every Event variant is represented, matching the conformance table.
+  assert_eq(events.length(), 25)
   assert_eq(Event::HttpDisconnect == Event::HttpDisconnect, true)
   assert_eq(events[0] == Event::HttpRequest(body=b"", more_body=false), true)
 }

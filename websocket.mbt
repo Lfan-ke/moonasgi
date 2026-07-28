@@ -38,14 +38,15 @@ pub(all) enum WsSend {
 /// shape, the WebSocket analog of the http `Handler`. `on_connect` decides the
 /// handshake from the scope; `on_receive` maps each inbound `WsMessage` to the
 /// frames to send back (it may `Close`); `on_disconnect` runs when the client
-/// goes away, carrying the close `code`. Driven in-process by `ws_run` and the
+/// goes away, carrying the close `code` and the optional close `reason` (ASGI
+/// 2.5). Driven in-process by `ws_run` and the
 /// `TestClient`, so accept/subprotocol/echo/close logic is testable on every
 /// backend without an async socket — the faithful synchronous core the async
 /// server (`mooncat`) lifts onto `AsgiApp`.
 pub(all) struct WebSocketHandler {
   on_connect : (WebSocketScope) -> WsAccept
   on_receive : (WsMessage) -> Array[WsSend]
-  on_disconnect : (Int) -> Array[WsSend]
+  on_disconnect : (Int, String?) -> Array[WsSend]
 }
 
 ///|
@@ -58,7 +59,7 @@ pub fn WebSocketHandler::new(
     Accept(subprotocol=None, headers=[])
   },
   on_receive? : (WsMessage) -> Array[WsSend] = fn(_m) { [] },
-  on_disconnect? : (Int) -> Array[WsSend] = fn(_c) { [] },
+  on_disconnect? : (Int, String?) -> Array[WsSend] = fn(_c, _r) { [] },
 ) -> WebSocketHandler {
   { on_connect, on_receive, on_disconnect }
 }
@@ -159,8 +160,8 @@ fn drive_ws(
             None => ()
           }
         }
-      WebSocketDisconnect(code~) => {
-        for s in (handler.on_disconnect)(code) {
+      WebSocketDisconnect(code~, reason~) => {
+        for s in (handler.on_disconnect)(code, reason) {
           out.push(ws_send_event(s))
         }
         closed = true

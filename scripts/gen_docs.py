@@ -26,6 +26,10 @@ SECTIONS = [
      "A table-driven self-test that drives every Event variant and every Scope "
      "field through run_http / ws_run / TestClient and asserts round-trip "
      "fidelity — reusable as run_conformance() to self-verify the seam wiring."),
+    ("validate", "validate.mbt", "Event-ordering validation",
+     "The ASGI ordering rules as code: validate_events walks an outbound stream "
+     "and names the first violation (a body before the response starts, a frame "
+     "before the handshake, and the rest), so a server can reject a buggy app."),
 ]
 
 KIND = {"struct": "struct", "enum": "enum", "fn": "fn", "type": "type", "let": "let"}
@@ -224,7 +228,7 @@ def main():
             'transport churn in a single server adapter.</p>'
             '<div class="badges">'
             '<a href="https://github.com/Lfan-ke/moonasgi/actions"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Lfan-ke/moonasgi/ci.yml?branch=master&label=CI&logo=github"></a>'
-            '<img alt="tests" src="https://img.shields.io/badge/tests-28%20passing%20%C3%974%20backends-0ca678">'
+            '<img alt="tests" src="https://img.shields.io/badge/tests-34%20passing%20%C3%974%20backends-0ca678">'
             '<a href="https://github.com/Lfan-ke/moonasgi"><img alt="GitHub" src="https://img.shields.io/badge/GitHub-source-24292f?logo=github"></a>'
             '<img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-6d5efc"></div>'
             '<div class="install"><span class="prompt">$</span><code>moon add Lfan-ke/moonasgi</code>'

@@ -18,11 +18,22 @@ pub fn PushPromise::header(self : PushPromise, name : String) -> String? {
 }
 
 ///|
+/// A `http.response.zerocopysend` message captured by the `TestClient`: the open
+/// file descriptor the app handed off, and the optional byte `offset` / `count`.
+/// The sans-transport analog of the server performing the zero-copy send.
+pub(all) struct ZeroCopySend {
+  fd : Int
+  offset : Int?
+  count : Int?
+} derive(Eq)
+
+///|
 /// The materialised result of driving an application in-process: the response
 /// status and headers, the body reassembled from every `HttpResponseBody`
 /// chunk, the trailing headers gathered from `HttpResponseTrailers`, any push
-/// promises, the `pathsend` path if the app used the path-send extension, and
-/// the `early_hints` (each a `103` message's `Link` values). The captured,
+/// promises, the `pathsend` path if the app used the path-send extension, the
+/// last `zerocopysend` handoff, every `debug` info payload, and the
+/// `early_hints` (each a `103` message's `Link` values). The captured,
 /// sans-transport analog of what a real client would observe.
 pub(all) struct TestResponse {
   status : Int
@@ -31,6 +42,8 @@ pub(all) struct TestResponse {
   trailers : Array[(String, String)]
   pushes : Array[PushPromise]
   pathsend : String?
+  zerocopysend : ZeroCopySend?
+  debug : Array[Json]
   early_hints : Array[Array[String]]
 } derive(Eq)
 
@@ -85,6 +98,8 @@ fn reassemble(events : Array[Event]) -> TestResponse {
   let trailers : Array[(String, String)] = []
   let pushes : Array[PushPromise] = []
   let mut pathsend : String? = None
+  let mut zerocopysend : ZeroCopySend? = None
+  let debug : Array[Json] = []
   let early_hints : Array[Array[String]] = []
   for ev in events {
     match ev {
@@ -100,6 +115,9 @@ fn reassemble(events : Array[Event]) -> TestResponse {
       HttpResponsePush(path=p, headers=h) =>
         pushes.push({ path: p, headers: h })
       HttpResponsePathSend(path=p) => pathsend = Some(p)
+      HttpResponseZeroCopySend(fd~, offset~, count~, more_body=_) =>
+        zerocopysend = Some({ fd, offset, count })
+      HttpResponseDebug(info~) => debug.push(info)
       HttpResponseEarlyHint(links=l) => early_hints.push(l)
       _ => ()
     }
@@ -111,6 +129,8 @@ fn reassemble(events : Array[Event]) -> TestResponse {
     trailers,
     pushes,
     pathsend,
+    zerocopysend,
+    debug,
     early_hints,
   }
 }
@@ -407,6 +427,8 @@ fn reassemble_ws(events : Array[Event]) -> WsTestSession {
       trailers: [],
       pushes: [],
       pathsend: None,
+      zerocopysend: None,
+      debug: [],
       early_hints: [],
     })
   } else {
@@ -438,7 +460,7 @@ fn ws_inbound(messages : Array[WsMessage], disconnect : Int?) -> Array[Event] {
     }
   }
   match disconnect {
-    Some(c) => out.push(WebSocketDisconnect(code=c))
+    Some(c) => out.push(WebSocketDisconnect(code=c, reason=None))
     None => ()
   }
   out
@@ -448,7 +470,7 @@ fn ws_inbound(messages : Array[WsMessage], disconnect : Int?) -> Array[Event] {
 /// Build the synthetic `WebSocketScope` the WebSocket driver runs against: the
 /// path/query split off `path`, the client's `base_headers` merged before the
 /// per-connection `headers`, the offered `subprotocols`, the websocket `asgi`
-/// handshake (sub-spec `2.4`), and the client's `root_path` / peers / advertised
+/// handshake (sub-spec `2.5`), and the client's `root_path` / peers / advertised
 /// `extensions`.
 fn TestClient::ws_scope(
   self : TestClient,

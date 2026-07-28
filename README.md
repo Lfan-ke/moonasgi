@@ -86,6 +86,13 @@ let report = run_conformance()
 assert_eq(report.ok(), true)
 ```
 
+The harness also runs a **negative table**: ASGI pins the order an app may emit messages in, and `validate_events(scope, events)` walks an outbound stream and names the first violation — a body before the response starts, a second `http.response.start`, a websocket frame before the handshake is accepted, a lifespan shutdown reply before startup, and the rest. A server can run it over its own emissions to reject a buggy app early.
+
+```moonbit
+let bad = [HttpResponseBody(body=b"x", more_body=false)]  // no start
+assert_eq(validate_events(scope, bad) == Some(BodyBeforeStart), true)
+```
+
 ## Extensions & streaming
 
 The standard ASGI extensions are modelled as typed events and scope fields, not stringly-typed dicts:
@@ -93,11 +100,44 @@ The standard ASGI extensions are modelled as typed events and scope fields, not 
 - **`http.response.trailers`** — `StreamingResponse.trailers`; lowered to `HttpResponseStart{trailers: true}` + a terminating `HttpResponseTrailers`.
 - **`http.response.push`** — `HttpResponsePush{path, headers}`.
 - **`http.response.pathsend`** — `HttpResponsePathSend{path}`.
+- **`http.response.zerocopysend`** — `HttpResponseZeroCopySend{fd, offset, count, more_body}`; captured by the `TestClient` as `TestResponse.zerocopysend`.
 - **`http.response.early_hint`** — `HttpResponseEarlyHint{links}`; `StreamingResponse.early_hints`, lowered to `103 Early Hints` messages ahead of the response.
+- **`http.response.debug`** — `HttpResponseDebug{info}`; an out-of-band info payload with no protocol meaning, valid anywhere in the response.
 - **`websocket.http.response`** — `WebSocketHttpResponseStart` / `WebSocketHttpResponseBody`, to deny a handshake with a full HTTP response.
 - **`tls`** — `TlsExtension` carried on the scope's `extensions`.
 
-A server advertises what it honours via the typed `Extensions` capability flags; response streaming (multiple `HttpResponseBody` with `more_body: true`) is modelled by `StreamingResponse` and driven by `run_http_stream`. `spec_version` is negotiated numerically with `AsgiVersion::at_least`, and each sub-protocol carries its own default — `AsgiVersion::http()` / `websocket()` (`2.4`) and `lifespan()` (`2.0`).
+A server advertises what it honours via the typed `Extensions` capability flags; response streaming (multiple `HttpResponseBody` with `more_body: true`) is modelled by `StreamingResponse` and driven by `run_http_stream`. `spec_version` is negotiated numerically with `AsgiVersion::at_least`, and each sub-protocol carries its own default — `AsgiVersion::http()` / `websocket()` (`2.5`, the 2024-06-05 revision) and `lifespan()` (`2.0`). The `2.5` websocket revision adds `reason` to `WebSocketDisconnect`, threaded to a handler's `on_disconnect(code, reason)`.
+
+## Compliance matrix
+
+Every ASGI 3.0 spec feature, and the test that exercises it. `conformance` is `run_conformance()`'s in-suite battery; `test` names are the whitebox tests.
+
+| Spec feature | Modelled as | Covered by |
+|---|---|---|
+| `http` scope (all fields incl. `state`, `raw_path`, `root_path`) | `HttpScope` | `conformance` scope/http-fields |
+| `websocket` scope (incl. `subprotocols`, `state`) | `WebSocketScope` | `conformance` scope/ws-fields |
+| `lifespan` scope (incl. `state`) | `LifespanScope` | `conformance` scope/lifespan-fields |
+| `asgi` version / `spec_version` (2.5 http+ws, 2.0 lifespan) | `AsgiVersion` | `conformance` spec_version/*; test "per-subprotocol asgi spec_version defaults" |
+| `spec_version` numeric negotiation | `AsgiVersion::at_least` | test "AsgiVersion negotiates spec_version numerically" |
+| Every http/ws/lifespan message, both directions | `Event` (25 variants) | `conformance` event/*; test "SEAM scope and event variants construct" |
+| `http.request` drain (streamed `more_body`) | `run_http` / `TestClient` | test "TestClient streams a chunked request body into the handler" |
+| `http.disconnect` | `HttpDisconnect` | `conformance` event/* |
+| `http.response.start` + `.body` round-trip | `Response` / `run_http` | `conformance` http/roundtrip; test "run_http drains a chunked body…" |
+| Response streaming (`more_body: true` chunks) | `StreamingResponse` / `run_http_stream` | test "TestClient reassembles a streaming multi-chunk response body" |
+| `websocket.connect` / `.accept` / `.receive` / `.send` / `.close` | `WebSocketHandler` / `ws_run` | test "ws_run echoes text and binary frames…" |
+| `websocket.disconnect` (2.5 `reason`) | `WebSocketDisconnect` | test "on_disconnect receives the 2.5 close code and reason" |
+| Handshake reject (bare close) | `WsAccept::Reject` | test "ws handler can reject the handshake with a close code" |
+| **ext** `http.response.trailers` | `StreamingResponse.trailers` | test "TestClient captures response trailers" |
+| **ext** `http.response.push` | `HttpResponsePush` | test "TestClient captures server push and pathsend" |
+| **ext** `http.response.pathsend` | `HttpResponsePathSend` | test "TestClient captures server push and pathsend" |
+| **ext** `http.response.zerocopysend` | `HttpResponseZeroCopySend` | test "zerocopysend and debug extensions round-trip…" |
+| **ext** `http.response.early_hint` | `HttpResponseEarlyHint` | test "early-hint extension round-trips through the TestClient" |
+| **ext** `http.response.debug` | `HttpResponseDebug` | test "zerocopysend and debug extensions round-trip…" |
+| **ext** `websocket.http.response` (denial) | `WsAccept::DenyHttp` | test "ws handler can deny the handshake with a full HTTP response" |
+| **ext** `tls` | `TlsExtension` | test "Extensions builder advertises capabilities and TLS data" |
+| Message-ordering rules (all message sets) | `validate_events` | `conformance` order/*; test "validator names the violation…" |
+
+The one spec feature with no direct model is the C-level file object in `http.response.zerocopysend`: this seam is socket-free by design, so the file descriptor is carried as an `Int` fd and the actual `sendfile` is the server adapter's (`mooncat`) job.
 
 ## Design
 
@@ -106,7 +146,7 @@ A server advertises what it honours via the typed `Extensions` capability flags;
 
 ## Status
 
-`v0` — the SEAM (`Scope`, `Event`, `Receive`/`Send`/`AsgiApp`, `Request`/`Response`, `Handler`/`Middleware`) plus the full ASGI-extension event set (push, pathsend, trailers, early hints, WebSocket denial, TLS), `StreamingResponse` response streaming, the synchronous `run_http` and `ws_run` cores, the `TestClient` in-process driver for both HTTP and WebSocket, the `run_conformance` round-trip harness, and typed `Extensions`/`tls`/`spec_version` scope metadata — all warning-clean and tested across every backend. The async `Handler → AsgiApp` runtime adapter lands with `mooncat`, which owns the native async transport.
+`v0` — the SEAM (`Scope`, `Event`, `Receive`/`Send`/`AsgiApp`, `Request`/`Response`, `Handler`/`Middleware`) plus the full ASGI-extension event set (push, pathsend, zero-copy send, trailers, early hints, debug, WebSocket denial, TLS), `StreamingResponse` response streaming, the synchronous `run_http` and `ws_run` cores, the `TestClient` in-process driver for both HTTP and WebSocket, the `run_conformance` round-trip harness with its `validate_events` ordering table, and typed `Extensions`/`tls`/`spec_version` (2.5) scope metadata — all warning-clean and tested across every backend. The async `Handler → AsgiApp` runtime adapter lands with `mooncat`, which owns the native async transport.
 
 ## License
 

@@ -217,13 +217,13 @@ test "TestClient drives a full middleware-composed application" {
 
 ///|
 /// spec_version negotiation: `at_least` compares the dotted `spec_version`
-/// numerically, so a `2.4` scope satisfies a `2.3` requirement but not `2.5`.
+/// numerically, so a `2.5` scope satisfies a `2.4` requirement but not `2.6`.
 test "AsgiVersion negotiates spec_version numerically" {
   let v = AsgiVersion::default()
-  assert_eq(v.spec_version, "2.4")
+  assert_eq(v.spec_version, "2.5")
   assert_eq(v.at_least(major=2, minor=0), true)
-  assert_eq(v.at_least(major=2, minor=4), true)
-  assert_eq(v.at_least(major=2, minor=5), false)
+  assert_eq(v.at_least(major=2, minor=5), true)
+  assert_eq(v.at_least(major=2, minor=6), false)
   assert_eq(v.at_least(major=1, minor=9), true)
   assert_eq(v.at_least(major=3, minor=0), false)
   let old : AsgiVersion = { version: "3.0", spec_version: "2.10" }

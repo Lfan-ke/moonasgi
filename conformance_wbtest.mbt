@@ -8,7 +8,8 @@ test "ASGI 3.0 conformance harness is all-green" {
   assert_eq(report.failures, [])
   assert_eq(report.ok(), true)
   assert_eq(report.passed, report.total)
-  // The battery is substantial: 23 event self-checks + 253 pairwise-distinct
-  // checks + the http/ws/scope/extension/streaming/version tables.
-  assert_eq(report.total > 290, true)
+  // The battery is substantial: 25 event self-checks + 300 pairwise-distinct
+  // checks + the http/ws/scope/extension/streaming/version tables + the
+  // positive/negative event-ordering tables.
+  assert_eq(report.total > 350, true)
 }
