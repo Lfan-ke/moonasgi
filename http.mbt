@@ -21,9 +21,72 @@ pub(all) struct Response {
 } derive(Eq)
 
 ///|
+/// A streamed outbound response: the status line, headers, an ordered list of
+/// body `chunks` each emitted as its own `HttpResponseBody`, and optional
+/// trailing `trailers`. Models ASGI response streaming (multiple body messages
+/// with `more_body: true`) and the `http.response.trailers` extension without
+/// an async transport. `events` lowers it to the exact event sequence a server
+/// would send.
+pub(all) struct StreamingResponse {
+  status : Int
+  headers : Array[(String, String)]
+  chunks : Array[Bytes]
+  trailers : Array[(String, String)]
+} derive(Eq)
+
+///|
+/// Build a `StreamingResponse`. `status` defaults to `200`, `headers` and
+/// `trailers` to empty; `chunks` is the ordered body, each element becoming one
+/// `HttpResponseBody` frame.
+pub fn StreamingResponse::new(
+  chunks~ : Array[Bytes],
+  status? : Int = 200,
+  headers? : Array[(String, String)] = [],
+  trailers? : Array[(String, String)] = [],
+) -> StreamingResponse {
+  { status, headers, chunks, trailers }
+}
+
+///|
+/// Lower a streamed response to the outbound events a server sends: an
+/// `HttpResponseStart` (with `trailers` set when any are present), then one
+/// `HttpResponseBody` per chunk — `more_body: true` on all but the last — and,
+/// if there are trailers, a terminating `HttpResponseTrailers`. An empty
+/// `chunks` still yields a single empty final body, so the stream is always
+/// well-formed.
+pub fn StreamingResponse::events(self : StreamingResponse) -> Array[Event] {
+  let has_trailers = self.trailers.length() > 0
+  let out : Array[Event] = [
+    HttpResponseStart(
+      status=self.status,
+      headers=self.headers,
+      trailers=has_trailers,
+    ),
+  ]
+  if self.chunks.length() == 0 {
+    out.push(HttpResponseBody(body=b"", more_body=false))
+  } else {
+    for i = 0; i < self.chunks.length(); i = i + 1 {
+      let last = i == self.chunks.length() - 1
+      out.push(HttpResponseBody(body=self.chunks[i], more_body=!last))
+    }
+  }
+  if has_trailers {
+    out.push(HttpResponseTrailers(headers=self.trailers, more_trailers=false))
+  }
+  out
+}
+
+///|
 /// The ergonomic request→response function most handlers are written as. The
 /// synchronous sugar the suite lifts onto `AsgiApp` at the server boundary.
 pub type Handler = (Request) -> Response
+
+///|
+/// A streaming handler: produces a `StreamingResponse` (multi-chunk body,
+/// optional trailers) instead of a single buffered `Response`. Driven by
+/// `run_http_stream` and the `TestClient`.
+pub type StreamHandler = (Request) -> StreamingResponse
 
 ///|
 /// A handler transformer that wraps a downstream `Handler` to add cross-cutting
@@ -128,25 +191,25 @@ fn build_request(scope : HttpScope, body : Bytes) -> Request {
 
 ///|
 /// Serialise a `Response` into the outbound event pair a server sends: an
-/// `HttpResponseStart` carrying status and headers, then a single
-/// `HttpResponseBody` with the whole body and `more_body: false`.
-fn response_events(resp : Response) -> Array[Event] {
+/// `HttpResponseStart` carrying status and headers (no trailers), then a single
+/// `HttpResponseBody` with the whole body and `more_body: false`. The public
+/// `Response::events` for callers that want the lowered form directly.
+pub fn Response::events(self : Response) -> Array[Event] {
   [
-    HttpResponseStart(status=resp.status, headers=resp.headers),
-    HttpResponseBody(body=resp.body, more_body=false),
+    HttpResponseStart(status=self.status, headers=self.headers, trailers=false),
+    HttpResponseBody(body=self.body, more_body=false),
   ]
 }
 
 ///|
-/// The synchronous counterpart of `to_asgi`: drive a `Handler` over an already
-/// materialised inbound event sequence and return the outbound events a server
-/// would send. Drains the http body from `inbound` (accumulating `HttpRequest`
-/// chunks until `more_body` is false), runs the handler, and yields
-/// `[HttpResponseStart, HttpResponseBody]`. Non-http scopes yield `[]`, matching
-/// `to_asgi`'s no-op. This is the sans-transport core — usable as an in-memory
-/// test driver — that `to_asgi` wraps with async `receive`/`send`.
-pub fn run_http(
-  handler : Handler,
+/// The general sans-transport core: drain the http request body from `inbound`
+/// (accumulating `HttpRequest` chunks until `more_body` is false), hand the
+/// assembled `Request` to `app`, and return the outbound events `app` emits.
+/// This is the faithful synchronous analog of an ASGI app's `send` stream —
+/// `app` returns exactly the events it would push — and every server and the
+/// `TestClient` drive an application through it. Non-http scopes yield `[]`.
+pub fn run_http_app(
+  app : (Request) -> Array[Event],
   scope : Scope,
   inbound : Array[Event],
 ) -> Array[Event] {
@@ -158,10 +221,38 @@ pub fn run_http(
           break
         }
       }
-      response_events(handler(build_request(hs, buf.to_bytes())))
+      app(build_request(hs, buf.to_bytes()))
     }
     _ => []
   }
+}
+
+///|
+/// The synchronous counterpart of `to_asgi`: drive a `Handler` over an already
+/// materialised inbound event sequence and return the outbound events a server
+/// would send — `[HttpResponseStart, HttpResponseBody]` for an http scope, `[]`
+/// otherwise. A thin `run_http_app` wrapper over `Response::events`, the
+/// sans-transport core `to_asgi` mirrors with async `receive`/`send`.
+pub fn run_http(
+  handler : Handler,
+  scope : Scope,
+  inbound : Array[Event],
+) -> Array[Event] {
+  run_http_app(fn(req) { handler(req).events() }, scope, inbound)
+}
+
+///|
+/// Drive a streaming `StreamHandler` over an inbound event sequence, returning
+/// the full outbound stream — `HttpResponseStart`, one `HttpResponseBody` per
+/// chunk (`more_body: true` on all but the last), and a trailing
+/// `HttpResponseTrailers` when the response carries trailers. The streaming
+/// counterpart of `run_http`.
+pub fn run_http_stream(
+  handler : StreamHandler,
+  scope : Scope,
+  inbound : Array[Event],
+) -> Array[Event] {
+  run_http_app(fn(req) { handler(req).events() }, scope, inbound)
 }
 
 ///|
@@ -182,7 +273,7 @@ pub fn to_asgi(handler : Handler) -> AsgiApp {
 
         }
         let resp = handler(build_request(hs, buf.to_bytes()))
-        for event in response_events(resp) {
+        for event in resp.events() {
           send(event)
         }
       }

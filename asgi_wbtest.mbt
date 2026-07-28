@@ -79,6 +79,8 @@ test "run_http drains a chunked body, runs the handler, emits start+body" {
     headers: [("content-type", "text/plain")],
     client: None,
     server: None,
+    asgi: AsgiVersion::default(),
+    extensions: Extensions::none(),
     state: Map([]),
   }
   // A two-chunk streamed body, terminated by more_body=false.
@@ -94,7 +96,11 @@ test "run_http drains a chunked body, runs the handler, emits start+body" {
   assert_eq(out.length(), 2)
   assert_eq(
     out[0] ==
-    Event::HttpResponseStart(status=201, headers=[("x-seen", "/echo")]),
+    Event::HttpResponseStart(
+      status=201,
+      headers=[("x-seen", "/echo")],
+      trailers=false,
+    ),
     true,
   )
   assert_eq(
@@ -135,6 +141,8 @@ test "to_asgi matches run_http and drives receive/send in order" {
     headers: [],
     client: None,
     server: None,
+    asgi: AsgiVersion::default(),
+    extensions: Extensions::none(),
     state: Map([]),
   }
   let inbound : Array[Event] = [
@@ -146,7 +154,11 @@ test "to_asgi matches run_http and drives receive/send in order" {
   assert_eq(expected.length(), 2)
   assert_eq(
     expected[0] ==
-    Event::HttpResponseStart(status=200, headers=[("x-method", "PUT")]),
+    Event::HttpResponseStart(
+      status=200,
+      headers=[("x-method", "PUT")],
+      trailers=false,
+    ),
     true,
   )
   assert_eq(
@@ -168,6 +180,8 @@ test "SEAM scope and event variants construct" {
     headers: [],
     client: Some(("127.0.0.1", 51000)),
     server: Some(("127.0.0.1", 8000)),
+    asgi: AsgiVersion::default(),
+    extensions: Extensions::none(),
     state: Map([]),
   }
   let ws : WebSocketScope = {
@@ -181,6 +195,8 @@ test "SEAM scope and event variants construct" {
     client: None,
     server: None,
     subprotocols: ["chat"],
+    asgi: AsgiVersion::default(),
+    extensions: Extensions::none(),
     state: Map([]),
   }
   let scopes : Array[Scope] = [
@@ -192,8 +208,11 @@ test "SEAM scope and event variants construct" {
   let events : Array[Event] = [
     Event::HttpRequest(body=b"", more_body=false),
     Event::HttpDisconnect,
-    Event::HttpResponseStart(status=200, headers=[]),
+    Event::HttpResponseStart(status=200, headers=[], trailers=false),
     Event::HttpResponseBody(body=b"ok", more_body=false),
+    Event::HttpResponseTrailers(headers=[("digest", "x")], more_trailers=false),
+    Event::HttpResponsePush(path="/style.css", headers=[]),
+    Event::HttpResponsePathSend(path="/var/www/index.html"),
     Event::WebSocketConnect,
     Event::WebSocketReceive(text=Some("hi"), bytes=None),
     Event::WebSocketDisconnect(code=1000),
@@ -201,6 +220,8 @@ test "SEAM scope and event variants construct" {
     Event::WebSocketSendText("hi"),
     Event::WebSocketSendBytes(b"hi"),
     Event::WebSocketClose(code=1000, reason=""),
+    Event::WebSocketHttpResponseStart(status=403, headers=[]),
+    Event::WebSocketHttpResponseBody(body=b"denied", more_body=false),
     Event::LifespanStartup,
     Event::LifespanShutdown,
     Event::LifespanStartupComplete,
@@ -208,7 +229,7 @@ test "SEAM scope and event variants construct" {
     Event::LifespanShutdownComplete,
     Event::LifespanShutdownFailed(message="boom"),
   ]
-  assert_eq(events.length(), 17)
+  assert_eq(events.length(), 22)
   assert_eq(Event::HttpDisconnect == Event::HttpDisconnect, true)
   assert_eq(events[0] == Event::HttpRequest(body=b"", more_body=false), true)
 }

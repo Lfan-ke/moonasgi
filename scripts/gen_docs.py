@@ -11,7 +11,12 @@ SECTIONS = [
      "async Receive / Send / AsgiApp callables every server and framework binds to."),
     ("sugar", "http.mbt", "Ergonomic sugar",
      "The Request / Response / Handler / Middleware layer the suite lifts onto "
-     "AsgiApp at the server boundary, plus pure header and middleware helpers."),
+     "AsgiApp at the server boundary, plus the StreamingResponse and the "
+     "run_http / run_http_stream synchronous drivers."),
+    ("client", "client.mbt", "TestClient",
+     "The in-process application driver built on the synchronous core: send a "
+     "synthetic request, capture the reassembled response (body, trailers, "
+     "pushes, pathsend) — no socket, testable on every backend."),
 ]
 
 KIND = {"struct": "struct", "enum": "enum", "fn": "fn", "type": "type", "let": "let"}

@@ -44,7 +44,32 @@ pub type Handler    = (Request) -> Response
 pub type Middleware = (Handler) -> Handler
 ```
 
-`Event` is a typed sum over the full http / websocket / lifespan message sets in both directions, replacing ASGI's stringly-typed message dicts.
+`Event` is a typed sum over the full http / websocket / lifespan message sets in both directions — including the standard extension messages — replacing ASGI's stringly-typed message dicts.
+
+## TestClient
+
+Drive any application in-process, with no socket, on every backend. The `TestClient` is built on the synchronous `run_http_app` core: it fabricates a scope, feeds the request body in, runs the app, and reassembles the outbound event stream into a captured response.
+
+```moonbit
+let client = TestClient::new(handler)          // or ::from_stream / ::from_app
+let r = client.post("/echo", body=b"payload")
+assert_eq(r.status, 200)
+assert_eq(r.text(), "payload")
+```
+
+It reassembles a streamed multi-chunk body, captures response trailers, server-push promises, and the path-send target, and can stream a chunked request body in via `request(..., chunks=[...])`.
+
+## Extensions & streaming
+
+The standard ASGI extensions are modelled as typed events and scope fields, not stringly-typed dicts:
+
+- **`http.response.trailers`** — `StreamingResponse.trailers`; lowered to `HttpResponseStart{trailers: true}` + a terminating `HttpResponseTrailers`.
+- **`http.response.push`** — `HttpResponsePush{path, headers}`.
+- **`http.response.pathsend`** — `HttpResponsePathSend{path}`.
+- **`websocket.http.response`** — `WebSocketHttpResponseStart` / `WebSocketHttpResponseBody`, to deny a handshake with a full HTTP response.
+- **`tls`** — `TlsExtension` carried on the scope's `extensions`.
+
+A server advertises what it honours via the typed `Extensions` capability flags; response streaming (multiple `HttpResponseBody` with `more_body: true`) is modelled by `StreamingResponse` and driven by `run_http_stream`. `spec_version` is negotiated numerically with `AsgiVersion::at_least`.
 
 ## Design
 
@@ -53,7 +78,7 @@ pub type Middleware = (Handler) -> Handler
 
 ## Status
 
-`v0` — the SEAM types are **frozen**: `Scope`, `Event`, `Receive`/`Send`/`AsgiApp`, `Request`/`Response`, `Handler`/`Middleware`, and pure header/middleware helpers, all warning-clean across backends. The async `Handler → AsgiApp` runtime adapter lands with `mooncat`, which owns the native async transport.
+`v0` — the SEAM (`Scope`, `Event`, `Receive`/`Send`/`AsgiApp`, `Request`/`Response`, `Handler`/`Middleware`) plus the full ASGI-extension event set, `StreamingResponse` response streaming, the `TestClient` in-process driver, and typed `Extensions`/`tls`/`spec_version` scope metadata — all warning-clean and tested across every backend. The async `Handler → AsgiApp` runtime adapter lands with `mooncat`, which owns the native async transport.
 
 ## License
 
