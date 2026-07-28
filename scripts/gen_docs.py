@@ -11,8 +11,13 @@ SECTIONS = [
      "async Receive / Send / AsgiApp callables every server and framework binds to."),
     ("sugar", "http.mbt", "Ergonomic sugar",
      "The Request / Response / Handler / Middleware layer the suite lifts onto "
-     "AsgiApp at the server boundary, plus the StreamingResponse and the "
-     "run_http / run_http_stream synchronous drivers."),
+     "AsgiApp at the server boundary, plus the StreamingResponse, the scope-aware "
+     "run_http_scoped a framework binds to, and the run_http / run_http_stream "
+     "synchronous drivers."),
+    ("lifespan", "lifespan.mbt", "Lifespan core",
+     "The synchronous lifespan driver mirroring run_http: a startup / shutdown "
+     "LifespanHandler that seeds scope.state in place, driven in-process by "
+     "run_lifespan, with the failed-startup short-circuit ASGI pins."),
     ("websocket", "websocket.mbt", "WebSocket core",
      "The synchronous WebSocket core mirroring run_http: a connect / receive / "
      "disconnect WebSocketHandler (accept, subprotocols, echo, close, deny-with-"
@@ -228,7 +233,7 @@ def main():
             'transport churn in a single server adapter.</p>'
             '<div class="badges">'
             '<a href="https://github.com/Lfan-ke/moonasgi/actions"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Lfan-ke/moonasgi/ci.yml?branch=master&label=CI&logo=github"></a>'
-            '<img alt="tests" src="https://img.shields.io/badge/tests-34%20passing%20%C3%974%20backends-0ca678">'
+            '<img alt="tests" src="https://img.shields.io/badge/tests-40%20passing%20%C3%974%20backends-0ca678">'
             '<a href="https://github.com/Lfan-ke/moonasgi"><img alt="GitHub" src="https://img.shields.io/badge/GitHub-source-24292f?logo=github"></a>'
             '<img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-6d5efc"></div>'
             '<div class="install"><span class="prompt">$</span><code>moon add Lfan-ke/moonasgi</code>'

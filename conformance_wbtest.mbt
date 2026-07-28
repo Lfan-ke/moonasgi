@@ -10,6 +10,7 @@ test "ASGI 3.0 conformance harness is all-green" {
   assert_eq(report.passed, report.total)
   // The battery is substantial: 25 event self-checks + 300 pairwise-distinct
   // checks + the http/ws/scope/extension/streaming/version tables + the
-  // positive/negative event-ordering tables.
+  // positive/negative event-ordering tables + the lifespan-driver and
+  // scope-aware-core tables.
   assert_eq(report.total > 350, true)
 }

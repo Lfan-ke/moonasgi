@@ -211,14 +211,19 @@ pub fn Response::events(self : Response) -> Array[Event] {
 }
 
 ///|
-/// The general sans-transport core: drain the http request body from `inbound`
-/// (accumulating `HttpRequest` chunks until `more_body` is false), hand the
-/// assembled `Request` to `app`, and return the outbound events `app` emits.
-/// This is the faithful synchronous analog of an ASGI app's `send` stream —
-/// `app` returns exactly the events it would push — and every server and the
-/// `TestClient` drive an application through it. Non-http scopes yield `[]`.
-pub fn run_http_app(
-  app : (Request) -> Array[Event],
+/// The scope-aware sans-transport core: drain the http request body from
+/// `inbound` (accumulating `HttpRequest` chunks until `more_body` is false) and
+/// hand `app` the full `HttpScope` alongside the assembled body, returning the
+/// outbound events `app` emits. This is the seam a framework binds to — a
+/// framework reads what the ergonomic `Request` drops: `root_path` (for mounted
+/// sub-apps), `extensions` (to gate a feature on what the server advertises),
+/// `client`/`server` peers, the `asgi` handshake, and `state` (the map a
+/// lifespan startup seeds and the server copies onto every request scope). It is
+/// the synchronous analog of the ASGI `(scope, receive, send)` callable for the
+/// common drain-then-handle shape; `run_http_app` is the `Request`-level wrapper
+/// over it. Non-http scopes yield `[]`.
+pub fn run_http_scoped(
+  app : (HttpScope, Bytes) -> Array[Event],
   scope : Scope,
   inbound : Array[Event],
 ) -> Array[Event] {
@@ -230,10 +235,24 @@ pub fn run_http_app(
           break
         }
       }
-      app(build_request(hs, buf.to_bytes()))
+      app(hs, buf.to_bytes())
     }
     _ => []
   }
+}
+
+///|
+/// The `Request`-level sans-transport core: drain the http request body from
+/// `inbound`, hand the assembled `Request` to `app`, and return the outbound
+/// events `app` emits. The ergonomic wrapper over `run_http_scoped` for apps
+/// that only need the request line, headers, and body — every server and the
+/// `TestClient` drive a `Handler` through it. Non-http scopes yield `[]`.
+pub fn run_http_app(
+  app : (Request) -> Array[Event],
+  scope : Scope,
+  inbound : Array[Event],
+) -> Array[Event] {
+  run_http_scoped(fn(hs, body) { app(build_request(hs, body)) }, scope, inbound)
 }
 
 ///|

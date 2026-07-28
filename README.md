@@ -77,6 +77,33 @@ assert_eq(session.texts(), ["hello"])
 
 A handler can `Accept` (negotiating a subprotocol and response headers), `Reject` with a bare close code, or `DenyHttp` with a full HTTP response (the `websocket.http.response` extension). `ws_run_app` is the escape hatch for apps whose control flow is not the connect/receive/disconnect fold — it hands the whole inbound stream and full scope to the app.
 
+## Lifespan
+
+The lifespan protocol has the same shape as the http and WebSocket cores. A `LifespanHandler` is written as a startup and a shutdown hook; `run_lifespan` drives it over the inbound `LifespanStartup` / `LifespanShutdown` events and returns the replies a server sends. Startup seeds `scope.state` in place — the map a server then copies onto every request scope, which is how a DB pool or loaded config reaches each request. A failed startup short-circuits: the server never proceeds to shutdown, exactly as ASGI pins.
+
+```moonbit
+let app = LifespanHandler::new(
+  on_startup=fn(scope) {
+    scope.state["db_pool"] = Json::string("pool://greet")   // seeded in place
+    Complete
+  },
+)
+let out = run_lifespan(app, Lifespan(scope), [LifespanStartup])
+assert_eq(out == [LifespanStartupComplete], true)
+```
+
+## Scope-aware core
+
+The ergonomic `Handler` sees a `Request` — method, path, query, headers, body. A framework needs more: `root_path` for mounted sub-apps, `extensions` to gate a feature on what the server advertises, `client` for security, and `state` seeded by lifespan. `run_http_scoped` hands the app the full `HttpScope` alongside the drained body, and `run_http_app` is the `Request`-level wrapper over it.
+
+```moonbit
+run_http_scoped(fn(scope, body) {
+  let prefix = scope.state.get("greeting_prefix")  // lifespan-seeded
+  [HttpResponseStart(status=200, headers=[], trailers=false),
+   HttpResponseBody(body, more_body=false)]
+}, Http(scope), inbound)
+```
+
 ## Conformance
 
 `run_conformance()` is a table-driven harness that drives **every** `Event` variant and **every** `Scope` field through `run_http` / `ws_run` / `TestClient` and asserts round-trip fidelity — a value put in comes back unchanged, and no two distinct events or scope shapes are confused. It returns a `ConformanceReport` naming any failing check, so a downstream server can self-verify the seam wiring:
@@ -120,6 +147,8 @@ Every ASGI 3.0 spec feature, and the test that exercises it. `conformance` is `r
 | `asgi` version / `spec_version` (2.5 http+ws, 2.0 lifespan) | `AsgiVersion` | `conformance` spec_version/*; test "per-subprotocol asgi spec_version defaults" |
 | `spec_version` numeric negotiation | `AsgiVersion::at_least` | test "AsgiVersion negotiates spec_version numerically" |
 | Every http/ws/lifespan message, both directions | `Event` (25 variants) | `conformance` event/*; test "SEAM scope and event variants construct" |
+| Full scope reaches a framework (`state`, `root_path`, `extensions`) | `run_http_scoped` | `conformance` scoped/*; test "greet: moonapi http routing round-trips…" |
+| `lifespan.startup` / `.shutdown` (complete / failed, in-place `state`) | `LifespanHandler` / `run_lifespan` | `conformance` lifespan/*; test "greet: lifespan startup seeds state…" |
 | `http.request` drain (streamed `more_body`) | `run_http` / `TestClient` | test "TestClient streams a chunked request body into the handler" |
 | `http.disconnect` | `HttpDisconnect` | `conformance` event/* |
 | `http.response.start` + `.body` round-trip | `Response` / `run_http` | `conformance` http/roundtrip; test "run_http drains a chunked body…" |
@@ -139,6 +168,18 @@ Every ASGI 3.0 spec feature, and the test that exercises it. `conformance` is `r
 
 The one spec feature with no direct model is the C-level file object in `http.response.zerocopysend`: this seam is socket-free by design, so the file descriptor is carried as an `Int` fd and the actual `sendfile` is the server adapter's (`mooncat`) job.
 
+## Consumed by
+
+The seam is the only thing the server and the frameworks share. Each binds to a specific slice of it.
+
+**[mooncat](https://github.com/Lfan-ke/mooncat)** — the ASGI server. Owns the async `Receive` / `Send` and the native transport, binds `AsgiApp`, and drives every core: it drains the http request body, runs `run_lifespan` at boot and teardown, and drives WebSocket connections. It copies `LifespanScope.state` onto each `HttpScope.state`, serialises the outbound `Event` stream (`HttpResponseStart` / `HttpResponseBody` / `HttpResponseTrailers` / the extension messages) to the socket, and can run `validate_events` over an app's emissions to reject a buggy app before writing.
+
+**[moonapi](https://github.com/Lfan-ke/moonapi)** — the web framework. Binds at the scope level through `run_http_scoped`, because it reads what the ergonomic `Request` drops: `HttpScope.root_path` (mounted sub-apps), `extensions` (gate a response push or path-send on what the server advertises), `client` (security), and `state` (the lifespan-seeded pool / config). It returns `Response` and `StreamingResponse`, serves its OpenAPI document as an ordinary response, and registers `LifespanHandler` startup / shutdown hooks that mooncat runs.
+
+**[moonzero](https://github.com/Lfan-ke/moonzero)** — the service assembler. Stacks its middleware (request-id, CORS, logging, recovery) as `Middleware` values and folds them over a `Handler` with `compose`, outermost-first.
+
+The `greet: *` whitebox tests assemble a representative app across all three shapes and drive it through these exact seam points, so the seam is proven greet-ready before any consuming repo is wired up.
+
 ## Design
 
 - **Zero dependencies.** The seam is pure types plus a small sugar layer; the concrete `moonbitlang/async` transport types live only in the `mooncat` adapter. Async or backend churn stops at the seam (see the isolation contract).
@@ -146,7 +187,7 @@ The one spec feature with no direct model is the C-level file object in `http.re
 
 ## Status
 
-`v0` — the SEAM (`Scope`, `Event`, `Receive`/`Send`/`AsgiApp`, `Request`/`Response`, `Handler`/`Middleware`) plus the full ASGI-extension event set (push, pathsend, zero-copy send, trailers, early hints, debug, WebSocket denial, TLS), `StreamingResponse` response streaming, the synchronous `run_http` and `ws_run` cores, the `TestClient` in-process driver for both HTTP and WebSocket, the `run_conformance` round-trip harness with its `validate_events` ordering table, and typed `Extensions`/`tls`/`spec_version` (2.5) scope metadata — all warning-clean and tested across every backend. The async `Handler → AsgiApp` runtime adapter lands with `mooncat`, which owns the native async transport.
+`v0` — the SEAM (`Scope`, `Event`, `Receive`/`Send`/`AsgiApp`, `Request`/`Response`, `Handler`/`Middleware`) plus the full ASGI-extension event set (push, pathsend, zero-copy send, trailers, early hints, debug, WebSocket denial, TLS), `StreamingResponse` response streaming, the synchronous `run_http`, `run_http_scoped`, `run_lifespan`, and `ws_run` cores, the `TestClient` in-process driver for both HTTP and WebSocket, the `run_conformance` round-trip harness (405 checks) with its `validate_events` ordering table, and typed `Extensions`/`tls`/`spec_version` (2.5) scope metadata — 40 tests, warning-clean across every backend. The async `Handler → AsgiApp` runtime adapter lands with `mooncat`, which owns the native async transport.
 
 ## License
 

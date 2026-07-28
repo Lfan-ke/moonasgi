@@ -488,6 +488,78 @@ pub fn run_conformance() -> ConformanceReport {
   for bc in bad_ls {
     check("order/ls-bad/" + bc.0, validate_events(lscope, bc.1) == Some(bc.2))
   }
+  // J. lifespan driver: startup/shutdown replies, in-place state seeding, the
+  //    full cycle's ordering, and the failed-startup short-circuit ASGI pins.
+  let boot_scope = LifespanScope::new()
+  let boot = LifespanHandler::new(on_startup=fn(s) {
+    s.state["ready"] = true.to_json()
+    Complete
+  })
+  let ls_driven = Lifespan(boot_scope)
+  let up = run_lifespan(boot, ls_driven, [LifespanStartup])
+  check("lifespan/startup-complete", up == [LifespanStartupComplete])
+  check("lifespan/state-seeded", boot_scope.state.get("ready") is Some(_))
+  let cyc_scope = Lifespan(LifespanScope::new())
+  let cyc = run_lifespan(boot, cyc_scope, [LifespanStartup, LifespanShutdown])
+  check(
+    "lifespan/full-cycle",
+    cyc == [LifespanStartupComplete, LifespanShutdownComplete],
+  )
+  check("lifespan/cycle-valid", validate_events(cyc_scope, cyc) == None)
+  let sfail = LifespanHandler::new(on_shutdown=fn(_s) {
+    Failed(message="drain")
+  })
+  check(
+    "lifespan/shutdown-failed",
+    run_lifespan(sfail, Lifespan(LifespanScope::new()), [LifespanShutdown]) ==
+    [LifespanShutdownFailed(message="drain")],
+  )
+  let ufail = LifespanHandler::new(on_startup=fn(_s) { Failed(message="boom") })
+  check(
+    "lifespan/startup-failed-short-circuits",
+    run_lifespan(ufail, Lifespan(LifespanScope::new()), [
+      LifespanStartup,
+      LifespanShutdown,
+    ]) ==
+    [LifespanStartupFailed(message="boom")],
+  )
+  check(
+    "lifespan/non-lifespan-scope",
+    run_lifespan(boot, hscope, [LifespanStartup]).length() == 0,
+  )
+
+  // K. scope-aware http core: run_http_scoped hands the app the full HttpScope
+  //    (state, root_path) the ergonomic Request drops, and drains the body the
+  //    same way run_http_app does.
+  let seen_state : Array[Bool] = []
+  let seen_root : Array[String] = []
+  let scoped = fn(sh : HttpScope, sbody : Bytes) -> Array[Event] {
+    seen_state.push(sh.state.get("k") is Some(_))
+    seen_root.push(sh.root_path)
+    [
+      HttpResponseStart(status=200, headers=[], trailers=false),
+      HttpResponseBody(body=sbody, more_body=false),
+    ]
+  }
+  let scoped_scope = Http(
+    HttpScope::new(
+      http_method="POST",
+      path="/x",
+      root_path="/mnt",
+      state=Map([("k", Json::string("v"))]),
+    ),
+  )
+  let scoped_out = run_http_scoped(scoped, scoped_scope, [
+    HttpRequest(body=b"ab", more_body=true),
+    HttpRequest(body=b"c", more_body=false),
+  ])
+  check("scoped/state-visible", seen_state == [true])
+  check("scoped/root-visible", seen_root == ["/mnt"])
+  check("scoped/body-drained", reassemble(scoped_out).body == b"abc")
+  check(
+    "scoped/non-http-scope",
+    run_http_scoped(scoped, lscope, [LifespanStartup]).length() == 0,
+  )
   let failures : Array[String] = []
   for r in results {
     if !r.1 {
