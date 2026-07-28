@@ -21,8 +21,9 @@ pub fn PushPromise::header(self : PushPromise, name : String) -> String? {
 /// The materialised result of driving an application in-process: the response
 /// status and headers, the body reassembled from every `HttpResponseBody`
 /// chunk, the trailing headers gathered from `HttpResponseTrailers`, any push
-/// promises, and the `pathsend` path if the app used the path-send extension.
-/// The captured, sans-transport analog of what a real client would observe.
+/// promises, the `pathsend` path if the app used the path-send extension, and
+/// the `early_hints` (each a `103` message's `Link` values). The captured,
+/// sans-transport analog of what a real client would observe.
 pub(all) struct TestResponse {
   status : Int
   headers : Array[(String, String)]
@@ -30,6 +31,7 @@ pub(all) struct TestResponse {
   trailers : Array[(String, String)]
   pushes : Array[PushPromise]
   pathsend : String?
+  early_hints : Array[Array[String]]
 } derive(Eq)
 
 ///|
@@ -72,7 +74,8 @@ pub fn TestResponse::json(self : TestResponse) -> Json raise {
 /// Fold an outbound event stream into a `TestResponse`: `HttpResponseStart`
 /// sets status/headers, every `HttpResponseBody` appends to the body, every
 /// `HttpResponseTrailers` appends to the trailers, each `HttpResponsePush`
-/// records a promise, and `HttpResponsePathSend` records the served path. Other
+/// records a promise, `HttpResponsePathSend` records the served path, and every
+/// `HttpResponseEarlyHint` records one `103` message's `Link` values. Other
 /// events (websocket, lifespan) are ignored — the http response is what a client
 /// observes.
 fn reassemble(events : Array[Event]) -> TestResponse {
@@ -82,6 +85,7 @@ fn reassemble(events : Array[Event]) -> TestResponse {
   let trailers : Array[(String, String)] = []
   let pushes : Array[PushPromise] = []
   let mut pathsend : String? = None
+  let early_hints : Array[Array[String]] = []
   for ev in events {
     match ev {
       HttpResponseStart(status=s, headers=h, trailers=_) => {
@@ -96,10 +100,19 @@ fn reassemble(events : Array[Event]) -> TestResponse {
       HttpResponsePush(path=p, headers=h) =>
         pushes.push({ path: p, headers: h })
       HttpResponsePathSend(path=p) => pathsend = Some(p)
+      HttpResponseEarlyHint(links=l) => early_hints.push(l)
       _ => ()
     }
   }
-  { status, headers, body: buf.to_bytes(), trailers, pushes, pathsend }
+  {
+    status,
+    headers,
+    body: buf.to_bytes(),
+    trailers,
+    pushes,
+    pathsend,
+    early_hints,
+  }
 }
 
 ///|
@@ -297,4 +310,201 @@ pub fn TestClient::patch(
   headers? : Array[(String, String)] = [],
 ) -> TestResponse {
   self.request(http_method="PATCH", path~, headers~, body~)
+}
+
+///|
+/// The materialised result of driving a WebSocket connection in-process: whether
+/// the handshake was `accepted`, the negotiated `subprotocol` and `accept_headers`,
+/// every server→client message (`messages`), whether the server `closed` and with
+/// what `close_code` / `close_reason`, and — when the handshake was denied with
+/// the `websocket.http.response` extension — the captured HTTP `denial` response.
+/// The WebSocket analog of `TestResponse`.
+pub(all) struct WsTestSession {
+  accepted : Bool
+  subprotocol : String?
+  accept_headers : Array[(String, String)]
+  messages : Array[WsMessage]
+  closed : Bool
+  close_code : Int?
+  close_reason : String?
+  denial : TestResponse?
+} derive(Eq)
+
+///|
+/// First accept-response header matching `name`.
+pub fn WsTestSession::header(self : WsTestSession, name : String) -> String? {
+  for pair in self.accept_headers {
+    if pair.0 == name {
+      return Some(pair.1)
+    }
+  }
+  None
+}
+
+///|
+/// The server→client messages that were text frames, decoded to their strings
+/// (binary frames are skipped). The ergonomic assertion target for an echo/chat
+/// exchange.
+pub fn WsTestSession::texts(self : WsTestSession) -> Array[String] {
+  let out : Array[String] = []
+  for m in self.messages {
+    match m {
+      Text(t) => out.push(t)
+      Binary(_) => ()
+    }
+  }
+  out
+}
+
+///|
+/// Fold an outbound WebSocket event stream into a `WsTestSession`:
+/// `WebSocketAccept` records the handshake and negotiated subprotocol/headers,
+/// every `WebSocketSendText` / `WebSocketSendBytes` appends a message,
+/// `WebSocketClose` records the close, and a `WebSocketHttpResponseStart` +
+/// `WebSocketHttpResponseBody` pair reconstructs the denial HTTP response. Other
+/// events are ignored.
+fn reassemble_ws(events : Array[Event]) -> WsTestSession {
+  let mut accepted = false
+  let mut subprotocol : String? = None
+  let mut accept_headers : Array[(String, String)] = []
+  let messages : Array[WsMessage] = []
+  let mut closed = false
+  let mut close_code : Int? = None
+  let mut close_reason : String? = None
+  let mut had_denial = false
+  let mut denial_status = 0
+  let mut denial_headers : Array[(String, String)] = []
+  let denial_body = Buffer()
+  for ev in events {
+    match ev {
+      WebSocketAccept(subprotocol=sp, headers=h) => {
+        accepted = true
+        subprotocol = sp
+        accept_headers = h
+      }
+      WebSocketSendText(t) => messages.push(Text(t))
+      WebSocketSendBytes(b) => messages.push(Binary(b))
+      WebSocketClose(code~, reason~) => {
+        closed = true
+        close_code = Some(code)
+        close_reason = Some(reason)
+      }
+      WebSocketHttpResponseStart(status~, headers~) => {
+        had_denial = true
+        denial_status = status
+        denial_headers = headers
+      }
+      WebSocketHttpResponseBody(body~, more_body=_) =>
+        denial_body.write_bytes(body[:])
+      _ => ()
+    }
+  }
+  let denial : TestResponse? = if had_denial {
+    Some({
+      status: denial_status,
+      headers: denial_headers,
+      body: denial_body.to_bytes(),
+      trailers: [],
+      pushes: [],
+      pathsend: None,
+      early_hints: [],
+    })
+  } else {
+    None
+  }
+  {
+    accepted,
+    subprotocol,
+    accept_headers,
+    messages,
+    closed,
+    close_code,
+    close_reason,
+    denial,
+  }
+}
+
+///|
+/// Materialise client→server messages into the inbound event stream a server
+/// hands a WebSocket app: a leading `WebSocketConnect`, one `WebSocketReceive`
+/// per message (text or binary), and a terminating `WebSocketDisconnect` when a
+/// `disconnect` code is given.
+fn ws_inbound(messages : Array[WsMessage], disconnect : Int?) -> Array[Event] {
+  let out : Array[Event] = [WebSocketConnect]
+  for m in messages {
+    match m {
+      Text(t) => out.push(WebSocketReceive(text=Some(t), bytes=None))
+      Binary(b) => out.push(WebSocketReceive(text=None, bytes=Some(b)))
+    }
+  }
+  match disconnect {
+    Some(c) => out.push(WebSocketDisconnect(code=c))
+    None => ()
+  }
+  out
+}
+
+///|
+/// Build the synthetic `WebSocketScope` the WebSocket driver runs against: the
+/// path/query split off `path`, the client's `base_headers` merged before the
+/// per-connection `headers`, the offered `subprotocols`, the websocket `asgi`
+/// handshake (sub-spec `2.4`), and the client's `root_path` / peers / advertised
+/// `extensions`.
+fn TestClient::ws_scope(
+  self : TestClient,
+  path : String,
+  headers : Array[(String, String)],
+  subprotocols : Array[String],
+) -> WebSocketScope {
+  let (p, q) = split_target(path)
+  WebSocketScope::new(
+    path=p,
+    query_string=@utf8.encode(q),
+    root_path=self.root_path,
+    headers=[..self.base_headers, ..headers],
+    client=self.client,
+    server=self.server,
+    subprotocols~,
+    asgi=AsgiVersion::websocket(),
+    extensions=self.extensions,
+  )
+}
+
+///|
+/// Drive a `WebSocketHandler` through a full connection in-process and capture
+/// the result. Opens a `WebSocketConnect`, feeds each `send` message in as a
+/// `WebSocketReceive`, then (unless `disconnect` is `None`) a
+/// `WebSocketDisconnect` with the given close code, runs the handler through the
+/// synchronous `ws_run` core, and reassembles the server's outbound frames into a
+/// `WsTestSession`. No socket — testable on every backend, the WebSocket
+/// counterpart of `request`.
+pub fn TestClient::websocket(
+  self : TestClient,
+  path~ : String,
+  handler~ : WebSocketHandler,
+  send? : Array[WsMessage] = [],
+  headers? : Array[(String, String)] = [],
+  subprotocols? : Array[String] = [],
+  disconnect? : Int? = Some(1000),
+) -> WsTestSession {
+  let scope = self.ws_scope(path, headers, subprotocols)
+  reassemble_ws(ws_run(handler, WebSocket(scope), ws_inbound(send, disconnect)))
+}
+
+///|
+/// Drive a general `(WebSocketScope, Array[Event]) -> Array[Event]` application
+/// through a full connection in-process. Like `websocket`, but for an app that
+/// consumes the whole inbound stream directly (the `ws_run_app` escape hatch)
+/// rather than the connect/receive/disconnect fold.
+pub fn TestClient::websocket_app(
+  self : TestClient,
+  path~ : String,
+  app~ : (WebSocketScope, Array[Event]) -> Array[Event],
+  send? : Array[WsMessage] = [],
+  headers? : Array[(String, String)] = [],
+  subprotocols? : Array[String] = [],
+  disconnect? : Int? = Some(1000),
+) -> WsTestSession {
+  let scope = self.ws_scope(path, headers, subprotocols)
+  reassemble_ws(ws_run_app(app, WebSocket(scope), ws_inbound(send, disconnect)))
 }

@@ -26,43 +26,52 @@ pub(all) struct Response {
 /// trailing `trailers`. Models ASGI response streaming (multiple body messages
 /// with `more_body: true`) and the `http.response.trailers` extension without
 /// an async transport. `events` lowers it to the exact event sequence a server
-/// would send.
+/// would send. `early_hints` (the `http.response.early_hint` extension) are the
+/// `103 Early Hints` messages emitted ahead of the final response, each element
+/// a list of `Link` header values.
 pub(all) struct StreamingResponse {
   status : Int
   headers : Array[(String, String)]
   chunks : Array[Bytes]
   trailers : Array[(String, String)]
+  early_hints : Array[Array[String]]
 } derive(Eq)
 
 ///|
-/// Build a `StreamingResponse`. `status` defaults to `200`, `headers` and
-/// `trailers` to empty; `chunks` is the ordered body, each element becoming one
-/// `HttpResponseBody` frame.
+/// Build a `StreamingResponse`. `status` defaults to `200`, `headers`,
+/// `trailers` and `early_hints` to empty; `chunks` is the ordered body, each
+/// element becoming one `HttpResponseBody` frame.
 pub fn StreamingResponse::new(
   chunks~ : Array[Bytes],
   status? : Int = 200,
   headers? : Array[(String, String)] = [],
   trailers? : Array[(String, String)] = [],
+  early_hints? : Array[Array[String]] = [],
 ) -> StreamingResponse {
-  { status, headers, chunks, trailers }
+  { status, headers, chunks, trailers, early_hints }
 }
 
 ///|
-/// Lower a streamed response to the outbound events a server sends: an
-/// `HttpResponseStart` (with `trailers` set when any are present), then one
-/// `HttpResponseBody` per chunk — `more_body: true` on all but the last — and,
-/// if there are trailers, a terminating `HttpResponseTrailers`. An empty
+/// Lower a streamed response to the outbound events a server sends: one
+/// `HttpResponseEarlyHint` per early-hint message (before the response starts),
+/// then an `HttpResponseStart` (with `trailers` set when any are present), then
+/// one `HttpResponseBody` per chunk — `more_body: true` on all but the last —
+/// and, if there are trailers, a terminating `HttpResponseTrailers`. An empty
 /// `chunks` still yields a single empty final body, so the stream is always
 /// well-formed.
 pub fn StreamingResponse::events(self : StreamingResponse) -> Array[Event] {
   let has_trailers = self.trailers.length() > 0
-  let out : Array[Event] = [
+  let out : Array[Event] = []
+  for links in self.early_hints {
+    out.push(HttpResponseEarlyHint(links~))
+  }
+  out.push(
     HttpResponseStart(
       status=self.status,
       headers=self.headers,
       trailers=has_trailers,
     ),
-  ]
+  )
   if self.chunks.length() == 0 {
     out.push(HttpResponseBody(body=b"", more_body=false))
   } else {

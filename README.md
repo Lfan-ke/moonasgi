@@ -57,7 +57,34 @@ assert_eq(r.status, 200)
 assert_eq(r.text(), "payload")
 ```
 
-It reassembles a streamed multi-chunk body, captures response trailers, server-push promises, and the path-send target, and can stream a chunked request body in via `request(..., chunks=[...])`.
+It reassembles a streamed multi-chunk body, captures response trailers, server-push promises, early hints, and the path-send target, and can stream a chunked request body in via `request(..., chunks=[...])`.
+
+## WebSocket
+
+WebSocket app logic is testable in-process too, through the synchronous core `ws_run` — the WebSocket analog of `run_http`. A `WebSocketHandler` is written in the connect / receive / disconnect shape; the `TestClient` drives a whole connection and captures the result as a `WsTestSession`.
+
+```moonbit
+let client = TestClient::new(handler)
+let session = client.websocket(
+  path="/chat",
+  handler=WebSocketHandler::echo(subprotocol=Some("chat")),
+  send=[Text("hello"), Binary(b"\x01\x02")],
+)
+assert_eq(session.accepted, true)
+assert_eq(session.subprotocol, Some("chat"))
+assert_eq(session.texts(), ["hello"])
+```
+
+A handler can `Accept` (negotiating a subprotocol and response headers), `Reject` with a bare close code, or `DenyHttp` with a full HTTP response (the `websocket.http.response` extension). `ws_run_app` is the escape hatch for apps whose control flow is not the connect/receive/disconnect fold — it hands the whole inbound stream and full scope to the app.
+
+## Conformance
+
+`run_conformance()` is a table-driven harness that drives **every** `Event` variant and **every** `Scope` field through `run_http` / `ws_run` / `TestClient` and asserts round-trip fidelity — a value put in comes back unchanged, and no two distinct events or scope shapes are confused. It returns a `ConformanceReport` naming any failing check, so a downstream server can self-verify the seam wiring:
+
+```moonbit
+let report = run_conformance()
+assert_eq(report.ok(), true)
+```
 
 ## Extensions & streaming
 
@@ -66,10 +93,11 @@ The standard ASGI extensions are modelled as typed events and scope fields, not 
 - **`http.response.trailers`** — `StreamingResponse.trailers`; lowered to `HttpResponseStart{trailers: true}` + a terminating `HttpResponseTrailers`.
 - **`http.response.push`** — `HttpResponsePush{path, headers}`.
 - **`http.response.pathsend`** — `HttpResponsePathSend{path}`.
+- **`http.response.early_hint`** — `HttpResponseEarlyHint{links}`; `StreamingResponse.early_hints`, lowered to `103 Early Hints` messages ahead of the response.
 - **`websocket.http.response`** — `WebSocketHttpResponseStart` / `WebSocketHttpResponseBody`, to deny a handshake with a full HTTP response.
 - **`tls`** — `TlsExtension` carried on the scope's `extensions`.
 
-A server advertises what it honours via the typed `Extensions` capability flags; response streaming (multiple `HttpResponseBody` with `more_body: true`) is modelled by `StreamingResponse` and driven by `run_http_stream`. `spec_version` is negotiated numerically with `AsgiVersion::at_least`.
+A server advertises what it honours via the typed `Extensions` capability flags; response streaming (multiple `HttpResponseBody` with `more_body: true`) is modelled by `StreamingResponse` and driven by `run_http_stream`. `spec_version` is negotiated numerically with `AsgiVersion::at_least`, and each sub-protocol carries its own default — `AsgiVersion::http()` / `websocket()` (`2.4`) and `lifespan()` (`2.0`).
 
 ## Design
 
@@ -78,7 +106,7 @@ A server advertises what it honours via the typed `Extensions` capability flags;
 
 ## Status
 
-`v0` — the SEAM (`Scope`, `Event`, `Receive`/`Send`/`AsgiApp`, `Request`/`Response`, `Handler`/`Middleware`) plus the full ASGI-extension event set, `StreamingResponse` response streaming, the `TestClient` in-process driver, and typed `Extensions`/`tls`/`spec_version` scope metadata — all warning-clean and tested across every backend. The async `Handler → AsgiApp` runtime adapter lands with `mooncat`, which owns the native async transport.
+`v0` — the SEAM (`Scope`, `Event`, `Receive`/`Send`/`AsgiApp`, `Request`/`Response`, `Handler`/`Middleware`) plus the full ASGI-extension event set (push, pathsend, trailers, early hints, WebSocket denial, TLS), `StreamingResponse` response streaming, the synchronous `run_http` and `ws_run` cores, the `TestClient` in-process driver for both HTTP and WebSocket, the `run_conformance` round-trip harness, and typed `Extensions`/`tls`/`spec_version` scope metadata — all warning-clean and tested across every backend. The async `Handler → AsgiApp` runtime adapter lands with `mooncat`, which owns the native async transport.
 
 ## License
 

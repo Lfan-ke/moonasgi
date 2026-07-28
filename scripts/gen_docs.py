@@ -13,10 +13,19 @@ SECTIONS = [
      "The Request / Response / Handler / Middleware layer the suite lifts onto "
      "AsgiApp at the server boundary, plus the StreamingResponse and the "
      "run_http / run_http_stream synchronous drivers."),
+    ("websocket", "websocket.mbt", "WebSocket core",
+     "The synchronous WebSocket core mirroring run_http: a connect / receive / "
+     "disconnect WebSocketHandler (accept, subprotocols, echo, close, deny-with-"
+     "HTTP) driven in-process by ws_run / ws_run_app on every backend."),
     ("client", "client.mbt", "TestClient",
      "The in-process application driver built on the synchronous core: send a "
-     "synthetic request, capture the reassembled response (body, trailers, "
-     "pushes, pathsend) — no socket, testable on every backend."),
+     "synthetic request (or drive a WebSocket connection), capture the "
+     "reassembled response (body, trailers, pushes, pathsend, early hints) or "
+     "WsTestSession — no socket, testable on every backend."),
+    ("conformance", "conformance.mbt", "Conformance harness",
+     "A table-driven self-test that drives every Event variant and every Scope "
+     "field through run_http / ws_run / TestClient and asserts round-trip "
+     "fidelity — reusable as run_conformance() to self-verify the seam wiring."),
 ]
 
 KIND = {"struct": "struct", "enum": "enum", "fn": "fn", "type": "type", "let": "let"}
@@ -215,7 +224,7 @@ def main():
             'transport churn in a single server adapter.</p>'
             '<div class="badges">'
             '<a href="https://github.com/Lfan-ke/moonasgi/actions"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/Lfan-ke/moonasgi/ci.yml?branch=master&label=CI&logo=github"></a>'
-            '<img alt="tests" src="https://img.shields.io/badge/tests-4%20passing%20%C3%974%20backends-0ca678">'
+            '<img alt="tests" src="https://img.shields.io/badge/tests-28%20passing%20%C3%974%20backends-0ca678">'
             '<a href="https://github.com/Lfan-ke/moonasgi"><img alt="GitHub" src="https://img.shields.io/badge/GitHub-source-24292f?logo=github"></a>'
             '<img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-6d5efc"></div>'
             '<div class="install"><span class="prompt">$</span><code>moon add Lfan-ke/moonasgi</code>'

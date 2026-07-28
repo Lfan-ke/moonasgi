@@ -116,7 +116,7 @@ test "run_http is a no-op for non-http scopes" {
     ran.push(())
     Response::text("unused")
   }
-  let out = run_http(handler, Scope::Lifespan({ state: Map([]) }), [
+  let out = run_http(handler, Scope::Lifespan(LifespanScope::new()), [
     Event::LifespanShutdown,
   ])
   assert_eq(out.length(), 0)
@@ -202,7 +202,7 @@ test "SEAM scope and event variants construct" {
   let scopes : Array[Scope] = [
     Scope::Http(hs),
     Scope::WebSocket(ws),
-    Scope::Lifespan({ state: Map([]) }),
+    Scope::Lifespan(LifespanScope::new()),
   ]
   assert_eq(scopes.length(), 3)
   let events : Array[Event] = [

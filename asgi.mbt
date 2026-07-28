@@ -20,9 +20,33 @@ pub(all) struct AsgiVersion {
 
 ///|
 /// The default ASGI handshake: protocol `3.0`, sub-spec `2.4` (the current
-/// HTTP / WebSocket spec revision).
+/// HTTP / WebSocket spec revision). An alias of `http` — the common case.
 pub fn AsgiVersion::default() -> AsgiVersion {
+  AsgiVersion::http()
+}
+
+///|
+/// The HTTP handshake: protocol `3.0`, HTTP sub-spec `2.4` (the revision that
+/// carries `state`, the `http.response.trailers` / `http.response.pathsend` /
+/// `http.response.early_hint` extensions and the `raw_path` guarantee).
+pub fn AsgiVersion::http() -> AsgiVersion {
   { version: "3.0", spec_version: "2.4" }
+}
+
+///|
+/// The WebSocket handshake: protocol `3.0`, WebSocket sub-spec `2.4` (the
+/// revision that carries `state` and the `websocket.http.response` denial
+/// extension).
+pub fn AsgiVersion::websocket() -> AsgiVersion {
+  { version: "3.0", spec_version: "2.4" }
+}
+
+///|
+/// The Lifespan handshake: protocol `3.0`, lifespan sub-spec `2.0` (the revision
+/// that carries `state`). Lifespan versions independently of http/websocket, so
+/// a lifespan scope must not borrow the http `spec_version`.
+pub fn AsgiVersion::lifespan() -> AsgiVersion {
+  { version: "3.0", spec_version: "2.0" }
 }
 
 ///|
@@ -73,13 +97,15 @@ pub(all) struct TlsExtension {
 /// one extension that carries data (`tls`). A server sets a flag to advertise
 /// that it will honour the matching outbound event — an application checks the
 /// flag before emitting `HttpResponsePush` / `HttpResponsePathSend` /
-/// `HttpResponseTrailers` / `WebSocketHttpResponseStart`, exactly as an ASGI
-/// app tests `"http.response.push" in scope["extensions"]`.
+/// `HttpResponseEarlyHint` / `HttpResponseTrailers` /
+/// `WebSocketHttpResponseStart`, exactly as an ASGI app tests
+/// `"http.response.push" in scope["extensions"]`.
 pub(all) struct Extensions {
   tls : TlsExtension?
   http_response_push : Bool
   http_response_trailers : Bool
   http_response_pathsend : Bool
+  http_response_early_hint : Bool
   websocket_http_response : Bool
 } derive(Eq)
 
@@ -92,6 +118,7 @@ pub fn Extensions::none() -> Extensions {
     http_response_push: false,
     http_response_trailers: false,
     http_response_pathsend: false,
+    http_response_early_hint: false,
     websocket_http_response: false,
   }
 }
@@ -112,6 +139,14 @@ pub fn Extensions::enable_trailers(self : Extensions) -> Extensions {
 /// Advertise the path-send extension (`http.response.pathsend`).
 pub fn Extensions::enable_pathsend(self : Extensions) -> Extensions {
   { ..self, http_response_pathsend: true }
+}
+
+///|
+/// Advertise the early-hints extension (`http.response.early_hint`): the server
+/// will forward `HttpResponseEarlyHint` messages as `103 Early Hints`
+/// informational responses ahead of the final status.
+pub fn Extensions::enable_early_hint(self : Extensions) -> Extensions {
+  { ..self, http_response_early_hint: true }
 }
 
 ///|
@@ -251,9 +286,22 @@ pub fn WebSocketScope::new(
 
 ///|
 /// Lifespan scope (ASGI `type == "lifespan"`): a single run spanning process
-/// startup and shutdown, whose `state` seeds every request scope.
+/// startup and shutdown, whose `state` seeds every request scope. Carries its
+/// own `asgi` handshake — lifespan versions independently (sub-spec `2.0`), so
+/// it does not borrow the http/websocket `spec_version`.
 pub(all) struct LifespanScope {
+  asgi : AsgiVersion
   state : Map[String, Json]
+}
+
+///|
+/// Build a `LifespanScope` with the lifespan `asgi` handshake (sub-spec `2.0`)
+/// and an empty `state` by default.
+pub fn LifespanScope::new(
+  asgi? : AsgiVersion = AsgiVersion::lifespan(),
+  state? : Map[String, Json] = Map([]),
+) -> LifespanScope {
+  { asgi, state }
 }
 
 ///|
@@ -282,6 +330,10 @@ pub(all) enum Event {
   // `http.response.pathsend` extension: hand a file `path` to the server to
   // serve zero-copy, emitted after `HttpResponseStart`.
   HttpResponsePathSend(path~ : String)
+  // `http.response.early_hint` extension: a `103 Early Hints` informational
+  // response carrying `Link` header values, emitted before `HttpResponseStart`.
+  // May be sent repeatedly; each message is its own 103 response.
+  HttpResponseEarlyHint(links~ : Array[String])
   WebSocketConnect
   WebSocketReceive(text~ : String?, bytes~ : Bytes?)
   WebSocketDisconnect(code~ : Int)
