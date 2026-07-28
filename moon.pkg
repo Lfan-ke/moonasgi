@@ -1,3 +1,8 @@
 // moonasgi root package: the ASGI 3.0 SEAM. Zero deps by design — the concrete
 // `moonbitlang/async` transport types live only in the server (mooncat) adapter,
 // so backend/async churn never reaches the framework repos that import this.
+
+import {
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/json",
+}
