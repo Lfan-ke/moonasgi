@@ -402,12 +402,23 @@ pub fn run_conformance() -> ConformanceReport {
       "start+debug+body",
       [ok_start, HttpResponseDebug(info={ "k": "v" }.to_json()), ok_body],
     ),
+    // http.response.debug is out-of-band and valid at any point, including
+    // before the response starts.
+    (
+      "debug-before-start",
+      [HttpResponseDebug(info={ "k": "v" }.to_json()), ok_start, ok_body],
+    ),
   ]
   for vc in valid_http {
     check("order/http-valid/" + vc.0, validate_events(hscope, vc.1) == None)
   }
   let bad_http : Array[(String, Array[Event], EventOrderError)] = [
     ("body-before-start", [ok_body], BodyBeforeStart),
+    (
+      "zerocopy-before-start",
+      [HttpResponseZeroCopySend(fd=1, offset=None, count=None, more_body=false)],
+      BodyBeforeStart,
+    ),
     ("dup-start", [ok_start, ok_start], DuplicateResponseStart),
     (
       "hint-after-start",
