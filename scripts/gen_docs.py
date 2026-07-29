@@ -9,6 +9,11 @@ SECTIONS = [
     ("core", "asgi.mbt", "Core SEAM",
      "The load-bearing ASGI 3.0 seam: the typed Scope / Event contract and the "
      "async Receive / Send / AsgiApp callables every server and framework binds to."),
+    ("http2", "http2.mbt", "HTTP/2 pseudo-header lowering",
+     "HttpScope::from_h2_headers lowers an HTTP/2 (RFC 7540) or HTTP/3 HEADERS "
+     "block into a scope the way a conforming server does: pseudo-headers "
+     "consumed into the typed fields, host synthesised from :authority, and a "
+     "malformed set rejected with the exact Http2HeaderError."),
     ("sugar", "http.mbt", "Ergonomic sugar",
      "The Request / Response / Handler / Middleware layer the suite lifts onto "
      "AsgiApp at the server boundary, plus the StreamingResponse, the scope-aware "

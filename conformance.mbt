@@ -560,6 +560,121 @@ pub fn run_conformance() -> ConformanceReport {
     "scoped/non-http-scope",
     run_http_scoped(scoped, lscope, [LifespanStartup]).length() == 0,
   )
+
+  // L. HTTP/2 pseudo-header lowering: a HEADERS block (pseudo-headers + ordinary
+  //    fields in wire order) maps onto an HttpScope the way a conforming h2/h2c
+  //    server consumes a frame — request line from the pseudo-headers, host
+  //    synthesised from :authority, `:`-prefixed names stripped from the header
+  //    list — and every malformed set is rejected with the exact violation.
+  let h2 = HttpScope::from_h2_headers([
+    (":method", "POST"),
+    (":scheme", "https"),
+    (":authority", "example.test"),
+    (":path", "/items?page=2&q=x"),
+    ("content-type", "application/json"),
+    ("accept", "*/*"),
+  ])
+  check(
+    "h2/lower",
+    match h2 {
+      Ok(s) =>
+        s.http_method == "POST" &&
+        s.scheme == "https" &&
+        s.http_version == "2" &&
+        s.path == "/items" &&
+        s.raw_path == b"/items" &&
+        s.query_string == b"page=2&q=x" &&
+        s.asgi.spec_version == "2.5" &&
+        // :authority becomes the leading host header; pseudo-headers are gone.
+        s.headers ==
+        [
+          ("host", "example.test"),
+          ("content-type", "application/json"),
+          ("accept", "*/*"),
+        ]
+      Err(_) => false
+    },
+  )
+  // :authority replaces a host header the peer also sent (RFC 7540 §8.1.2.3).
+  let h2_host = HttpScope::from_h2_headers([
+    (":method", "GET"),
+    (":scheme", "http"),
+    (":authority", "authority.test"),
+    (":path", "/"),
+    ("host", "stale.test"),
+    ("x-trace", "1"),
+  ])
+  check(
+    "h2/authority-wins",
+    match h2_host {
+      Ok(s) => s.headers == [("host", "authority.test"), ("x-trace", "1")]
+      Err(_) => false
+    },
+  )
+  // No :authority: ordinary headers (including any host) pass through untouched,
+  // and http_version="3" is honoured for the shared HTTP/3 pseudo-header path.
+  let h3 = HttpScope::from_h2_headers(
+    [(":method", "GET"), (":scheme", "https"), (":path", "/p"), ("host", "h")],
+    http_version="3",
+  )
+  check(
+    "h2/no-authority",
+    match h3 {
+      Ok(s) => s.http_version == "3" && s.headers == [("host", "h")]
+      Err(_) => false
+    },
+  )
+  let bad_h2 : Array[(String, Array[(String, String)], Http2HeaderError)] = [
+    ("missing-method", [(":scheme", "https"), (":path", "/")], MissingMethod),
+    ("missing-scheme", [(":method", "GET"), (":path", "/")], MissingScheme),
+    ("missing-path", [(":method", "GET"), (":scheme", "https")], MissingPath),
+    (
+      "empty-path",
+      [(":method", "GET"), (":scheme", "https"), (":path", "")],
+      EmptyPath,
+    ),
+    (
+      "dup-method",
+      [
+        (":method", "GET"),
+        (":method", "POST"),
+        (":scheme", "h"),
+        (":path", "/"),
+      ],
+      DuplicatePseudoHeader(":method"),
+    ),
+    (
+      "unknown-pseudo",
+      [(":method", "GET"), (":scheme", "h"), (":path", "/"), (":x", "y")],
+      UnknownPseudoHeader(":x"),
+    ),
+    (
+      "pseudo-after-regular",
+      [(":method", "GET"), ("a", "b"), (":scheme", "h"), (":path", "/")],
+      PseudoHeaderAfterRegular(":scheme"),
+    ),
+  ]
+  for bc in bad_h2 {
+    check(
+      "h2/bad/" + bc.0,
+      match HttpScope::from_h2_headers(bc.1) {
+        Err(e) => e == bc.2
+        Ok(_) => false
+      },
+    )
+  }
+  // The SEAM is transport-version agnostic: an http_version="2" request drives
+  // the exact same synchronous core and yields the same response as "1.1".
+  let ver_seen : Array[String] = []
+  let ver_client = TestClient::new(fn(req) {
+    ver_seen.push(req.path)
+    Response::text("v2")
+  })
+  let v2 = ver_client.request(http_method="GET", path="/h2", http_version="2")
+  check(
+    "h2/seam-agnostic",
+    v2.status == 200 && v2.text() == "v2" && ver_seen == ["/h2"],
+  )
   let failures : Array[String] = []
   for r in results {
     if !r.1 {

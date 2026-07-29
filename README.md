@@ -104,6 +104,22 @@ run_http_scoped(fn(scope, body) {
 }, Http(scope), inbound)
 ```
 
+## HTTP/2 and HTTP/3
+
+`http_version` on the scope is `"1.0"`, `"1.1"`, `"2"`, or `"3"` — the SEAM is transport-agnostic, so an app runs unchanged whichever version served the request. The one place the version leaks into wiring is the request line: an HTTP/2 (RFC 7540 §8.1.2.3) or HTTP/3 request carries it as pseudo-headers (`:method`, `:scheme`, `:authority`, `:path`) interleaved with the ordinary fields, and ASGI has no slot for them in `scope["headers"]`. `HttpScope::from_h2_headers` owns that lowering so every h2/h2c/h3 transport in the suite (mooncat) produces the same scope from the same HEADERS block — pseudo-headers consumed into the typed fields, `host` synthesised from `:authority`, and no `:`-prefixed header ever reaching the app.
+
+```moonbit
+let scope = HttpScope::from_h2_headers([
+  (":method", "POST"), (":scheme", "https"),
+  (":authority", "example.test"), (":path", "/items?page=2"),
+  ("content-type", "application/json"),
+])
+// -> Ok: http_method="POST", scheme="https", path="/items",
+//        query_string=b"page=2", headers=[("host","example.test"), ...]
+```
+
+A malformed pseudo-header set — a missing required one, a duplicate, an unknown `:foo`, or a pseudo-header after an ordinary field — returns `Err(Http2HeaderError)` naming the first violation, so the transport can answer `RST_STREAM(PROTOCOL_ERROR)` instead of forwarding a bad scope.
+
 ## Conformance
 
 `run_conformance()` is a table-driven harness that drives **every** `Event` variant and **every** `Scope` field through `run_http` / `ws_run` / `TestClient` and asserts round-trip fidelity — a value put in comes back unchanged, and no two distinct events or scope shapes are confused. It returns a `ConformanceReport` naming any failing check, so a downstream server can self-verify the seam wiring:
@@ -165,6 +181,8 @@ Every ASGI 3.0 spec feature, and the test that exercises it. `conformance` is `r
 | **ext** `websocket.http.response` (denial) | `WsAccept::DenyHttp` | test "ws handler can deny the handshake with a full HTTP response" |
 | **ext** `tls` | `TlsExtension` | test "Extensions builder advertises capabilities and TLS data" |
 | Message-ordering rules (all message sets) | `validate_events` | `conformance` order/*; test "validator names the violation…" |
+| HTTP/2·3 pseudo-header → scope lowering (`:method`/`:scheme`/`:authority`/`:path`, host synthesis, malformed rejection) | `HttpScope::from_h2_headers` / `Http2HeaderError` | `conformance` h2/* |
+| `http_version` transport-agnostic seam (`"1.1"` / `"2"` / `"3"`) | `HttpScope.http_version` | `conformance` h2/seam-agnostic |
 
 The one spec feature with no direct model is the C-level file object in `http.response.zerocopysend`: this seam is socket-free by design, so the file descriptor is carried as an `Int` fd and the actual `sendfile` is the server adapter's (`mooncat`) job.
 
@@ -187,7 +205,7 @@ The `greet: *` whitebox tests assemble a representative app across all three sha
 
 ## Status
 
-`v0` — the SEAM (`Scope`, `Event`, `Receive`/`Send`/`AsgiApp`, `Request`/`Response`, `Handler`/`Middleware`) plus the full ASGI-extension event set (push, pathsend, zero-copy send, trailers, early hints, debug, WebSocket denial, TLS), `StreamingResponse` response streaming, the synchronous `run_http`, `run_http_scoped`, `run_lifespan`, and `ws_run` cores, the `TestClient` in-process driver for both HTTP and WebSocket, the `run_conformance` round-trip harness (405 checks) with its `validate_events` ordering table, and typed `Extensions`/`tls`/`spec_version` (2.5) scope metadata — 40 tests, warning-clean across every backend. The async `Handler → AsgiApp` runtime adapter lands with `mooncat`, which owns the native async transport.
+`v0` — the SEAM (`Scope`, `Event`, `Receive`/`Send`/`AsgiApp`, `Request`/`Response`, `Handler`/`Middleware`) plus the full ASGI-extension event set (push, pathsend, zero-copy send, trailers, early hints, debug, WebSocket denial, TLS), `StreamingResponse` response streaming, the synchronous `run_http`, `run_http_scoped`, `run_lifespan`, and `ws_run` cores, the `TestClient` in-process driver for both HTTP and WebSocket, the `run_conformance` round-trip harness (416 checks) with its `validate_events` ordering table, `HttpScope::from_h2_headers` HTTP/2·3 pseudo-header lowering, and typed `Extensions`/`tls`/`spec_version` (2.5) scope metadata — 40 tests, warning-clean across every backend. The async `Handler → AsgiApp` runtime adapter lands with `mooncat`, which owns the native async transport.
 
 ## License
 

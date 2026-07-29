@@ -253,12 +253,14 @@ pub fn TestClient::request(
   path~ : String,
   headers? : Array[(String, String)] = [],
   body? : Bytes = b"",
+  http_version? : String = "1.1",
   chunks? : Array[Bytes],
 ) -> TestResponse {
   let (p, q) = split_target(path)
   let scope = HttpScope::new(
     http_method~,
     path=p,
+    http_version~,
     query_string=@utf8.encode(q),
     root_path=self.root_path,
     headers=[..self.base_headers, ..headers],
