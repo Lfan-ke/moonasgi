@@ -744,6 +744,22 @@ pub fn run_conformance() -> ConformanceReport {
     headers_from_wire(headers_to_wire([("x-a", "1"), ("x-b", "café")])) ==
     [("x-a", "1"), ("x-b", "café")],
   )
+  // N. legacy 2.0 double-callable convention: run_legacy — the sync core of the
+  //    two-call shape double_to_single_callable lifts — yields exactly what a
+  //    single-callable app yields, so a 3.0 server stays backward-compatible with a
+  //    legacy 2.0 app.
+  let legacy_scope = Http(HttpScope::new(http_method="POST", path="/l"))
+  let legacy_inbound : Array[Event] = [HttpRequest(body=b"z", more_body=false)]
+  let legacy_handler : Handler = fn(_r) { Response::text("ok") }
+  let legacy_out = run_legacy(
+    fn(sc) { fn(inb) { run_http(legacy_handler, sc, inb) } },
+    legacy_scope,
+    legacy_inbound,
+  )
+  check(
+    "legacy/matches-single",
+    legacy_out == run_http(legacy_handler, legacy_scope, legacy_inbound),
+  )
   let failures : Array[String] = []
   for r in results {
     if !r.1 {
