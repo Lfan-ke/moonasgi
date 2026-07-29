@@ -107,7 +107,9 @@ pub(all) struct Extensions {
   http_response_push : Bool
   http_response_trailers : Bool
   http_response_pathsend : Bool
+  http_response_zerocopysend : Bool
   http_response_early_hint : Bool
+  http_response_debug : Bool
   websocket_http_response : Bool
 } derive(Eq)
 
@@ -120,7 +122,9 @@ pub fn Extensions::none() -> Extensions {
     http_response_push: false,
     http_response_trailers: false,
     http_response_pathsend: false,
+    http_response_zerocopysend: false,
     http_response_early_hint: false,
+    http_response_debug: false,
     websocket_http_response: false,
   }
 }
@@ -141,6 +145,20 @@ pub fn Extensions::enable_trailers(self : Extensions) -> Extensions {
 /// Advertise the path-send extension (`http.response.pathsend`).
 pub fn Extensions::enable_pathsend(self : Extensions) -> Extensions {
   { ..self, http_response_pathsend: true }
+}
+
+///|
+/// Advertise the zero-copy-send extension (`http.response.zerocopysend`): the
+/// server will send the contents of an open file descriptor with zero copies.
+pub fn Extensions::enable_zerocopysend(self : Extensions) -> Extensions {
+  { ..self, http_response_zerocopysend: true }
+}
+
+///|
+/// Advertise the debug extension (`http.response.debug`). Per the ASGI spec this
+/// is for testing only and production servers should not implement it.
+pub fn Extensions::enable_debug(self : Extensions) -> Extensions {
+  { ..self, http_response_debug: true }
 }
 
 ///|

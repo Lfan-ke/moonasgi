@@ -279,15 +279,39 @@ pub fn run_conformance() -> ConformanceReport {
     .enable_push()
     .enable_trailers()
     .enable_pathsend()
+    .enable_zerocopysend()
     .enable_early_hint()
+    .enable_debug()
     .enable_websocket_http_response()
   check(
     "ext/flags",
     ext.http_response_push &&
     ext.http_response_trailers &&
     ext.http_response_pathsend &&
+    ext.http_response_zerocopysend &&
     ext.http_response_early_hint &&
+    ext.http_response_debug &&
     ext.websocket_http_response,
+  )
+  // Each enable_* advertises exactly its own extension and leaves the rest off —
+  // the seven official ASGI extension keys, each independently toggled.
+  check(
+    "ext/zerocopysend-isolated",
+    {
+      let e = Extensions::none().enable_zerocopysend()
+      e.http_response_zerocopysend &&
+      !e.http_response_push &&
+      !e.http_response_debug
+    },
+  )
+  check(
+    "ext/debug-isolated",
+    {
+      let e = Extensions::none().enable_debug()
+      e.http_response_debug &&
+      !e.http_response_zerocopysend &&
+      !e.http_response_pathsend
+    },
   )
   let eh_client = TestClient::from_app(fn(_req) {
     [
