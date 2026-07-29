@@ -154,7 +154,7 @@ pub fn run_conformance() -> ConformanceReport {
     root_path="/api",
     headers=[("host", "h")],
     client=Some(("1.2.3.4", 5)),
-    server=Some(("9.8.7.6", 4)),
+    server=Some(("9.8.7.6", Some(4))),
     extensions=Extensions::none().enable_push(),
     state=Map([("k", Json::string("v"))]),
   )
@@ -169,7 +169,7 @@ pub fn run_conformance() -> ConformanceReport {
     hs.root_path == "/api" &&
     hs.headers == [("host", "h")] &&
     hs.client == Some(("1.2.3.4", 5)) &&
-    hs.server == Some(("9.8.7.6", 4)) &&
+    hs.server == Some(("9.8.7.6", Some(4))) &&
     hs.extensions.http_response_push &&
     hs.asgi.spec_version == "2.5",
   )
@@ -180,7 +180,7 @@ pub fn run_conformance() -> ConformanceReport {
     root_path="/rt",
     headers=[("origin", "o")],
     client=Some(("c", 1)),
-    server=Some(("s", 2)),
+    server=Some(("s", Some(2))),
     subprotocols=["chat", "json"],
     extensions=Extensions::none().enable_websocket_http_response(),
   )
@@ -192,7 +192,7 @@ pub fn run_conformance() -> ConformanceReport {
     wss.root_path == "/rt" &&
     wss.headers == [("origin", "o")] &&
     wss.client == Some(("c", 1)) &&
-    wss.server == Some(("s", 2)) &&
+    wss.server == Some(("s", Some(2))) &&
     wss.subprotocols == ["chat", "json"] &&
     wss.extensions.websocket_http_response &&
     wss.asgi.spec_version == "2.5",
@@ -201,6 +201,19 @@ pub fn run_conformance() -> ConformanceReport {
   check(
     "scope/lifespan-fields",
     ls.asgi.spec_version == "2.0" && ls.state.get("boot") is Some(_),
+  )
+  // A Unix-domain-socket server address is [path, None] — the port is optional
+  // (ASGI www spec), which a TCP `[host, port]` server never needs.
+  let unix = HttpScope::new(
+    http_method="GET",
+    path="/",
+    server=Some(("/run/app.sock", None)),
+  )
+  check(
+    "scope/unix-server",
+    unix.server == Some(("/run/app.sock", None)) &&
+    HttpScope::new(http_method="GET", path="/", server=Some(("h", Some(8080)))).server ==
+    Some(("h", Some(8080))),
   )
 
   // E. websocket round-trip through ws_run / TestClient: echo, subprotocol,

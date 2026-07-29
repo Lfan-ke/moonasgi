@@ -179,7 +179,7 @@ test "SEAM scope and event variants construct" {
     root_path: "",
     headers: [],
     client: Some(("127.0.0.1", 51000)),
-    server: Some(("127.0.0.1", 8000)),
+    server: Some(("127.0.0.1", Some(8000))),
     asgi: AsgiVersion::default(),
     extensions: Extensions::none(),
     state: Map([]),

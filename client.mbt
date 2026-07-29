@@ -147,7 +147,7 @@ pub(all) struct TestClient {
   root_path : String
   base_headers : Array[(String, String)]
   client : (String, Int)?
-  server : (String, Int)?
+  server : (String, Int?)?
   extensions : Extensions
 }
 
@@ -161,7 +161,7 @@ pub fn TestClient::from_app(
   root_path? : String = "",
   base_headers? : Array[(String, String)] = [],
   client? : (String, Int)? = Some(("testclient", 50000)),
-  server? : (String, Int)? = Some(("testserver", 80)),
+  server? : (String, Int?)? = Some(("testserver", Some(80))),
   extensions? : Extensions = Extensions::none(),
 ) -> TestClient {
   { app, root_path, base_headers, client, server, extensions }
@@ -174,7 +174,7 @@ pub fn TestClient::new(
   root_path? : String = "",
   base_headers? : Array[(String, String)] = [],
   client? : (String, Int)? = Some(("testclient", 50000)),
-  server? : (String, Int)? = Some(("testserver", 80)),
+  server? : (String, Int?)? = Some(("testserver", Some(80))),
   extensions? : Extensions = Extensions::none(),
 ) -> TestClient {
   TestClient::from_app(
@@ -195,7 +195,7 @@ pub fn TestClient::from_stream(
   root_path? : String = "",
   base_headers? : Array[(String, String)] = [],
   client? : (String, Int)? = Some(("testclient", 50000)),
-  server? : (String, Int)? = Some(("testserver", 80)),
+  server? : (String, Int?)? = Some(("testserver", Some(80))),
   extensions? : Extensions = Extensions::none(),
 ) -> TestClient {
   TestClient::from_app(

@@ -203,7 +203,7 @@ pub(all) struct HttpScope {
   root_path : String
   headers : Array[(String, String)]
   client : (String, Int)?
-  server : (String, Int)?
+  server : (String, Int?)?
   asgi : AsgiVersion
   extensions : Extensions
   state : Map[String, Json]
@@ -225,7 +225,7 @@ pub fn HttpScope::new(
   root_path? : String = "",
   headers? : Array[(String, String)] = [],
   client? : (String, Int)? = None,
-  server? : (String, Int)? = None,
+  server? : (String, Int?)? = None,
   asgi? : AsgiVersion = AsgiVersion::default(),
   extensions? : Extensions = Extensions::none(),
   state? : Map[String, Json] = Map([]),
@@ -260,7 +260,7 @@ pub(all) struct WebSocketScope {
   root_path : String
   headers : Array[(String, String)]
   client : (String, Int)?
-  server : (String, Int)?
+  server : (String, Int?)?
   subprotocols : Array[String]
   asgi : AsgiVersion
   extensions : Extensions
@@ -281,7 +281,7 @@ pub fn WebSocketScope::new(
   root_path? : String = "",
   headers? : Array[(String, String)] = [],
   client? : (String, Int)? = None,
-  server? : (String, Int)? = None,
+  server? : (String, Int?)? = None,
   subprotocols? : Array[String] = [],
   asgi? : AsgiVersion = AsgiVersion::default(),
   extensions? : Extensions = Extensions::none(),

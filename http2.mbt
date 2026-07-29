@@ -54,7 +54,7 @@ pub fn HttpScope::from_h2_headers(
   http_version? : String = "2",
   root_path? : String = "",
   client? : (String, Int)? = None,
-  server? : (String, Int)? = None,
+  server? : (String, Int?)? = None,
   extensions? : Extensions = Extensions::none(),
   asgi? : AsgiVersion = AsgiVersion::http(),
   state? : Map[String, Json] = Map([]),
