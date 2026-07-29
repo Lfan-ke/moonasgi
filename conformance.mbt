@@ -723,6 +723,27 @@ pub fn run_conformance() -> ConformanceReport {
     "h2/seam-agnostic",
     v2.status == 200 && v2.text() == "v2" && ver_seen == ["/h2"],
   )
+  // M. header wire codec: the seam types headers as latin-1 Strings, but the ASGI
+  //    spec types them as byte strings. The boundary codec must carry every byte
+  //    0x00..0xFF losslessly, so the black-box header I/O conforms to the spec for
+  //    any header a server puts on or takes off the wire.
+  let all_bytes = Buffer()
+  for b = 0; b < 256; b = b + 1 {
+    all_bytes.write_byte(b.to_byte())
+  }
+  let wire_in : Array[(Bytes, Bytes)] = [
+    (b"x-raw", all_bytes.to_bytes()),
+    (b"content-type", b"application/json"),
+  ]
+  let decoded = headers_from_wire(wire_in)
+  check("header/latin1-roundtrip", headers_to_wire(decoded) == wire_in)
+  check("header/latin1-name", decoded[1].0 == "content-type")
+  // Encoding a seam String header and decoding it back is the identity too.
+  check(
+    "header/latin1-seam-roundtrip",
+    headers_from_wire(headers_to_wire([("x-a", "1"), ("x-b", "café")])) ==
+    [("x-a", "1"), ("x-b", "café")],
+  )
   let failures : Array[String] = []
   for r in results {
     if !r.1 {
