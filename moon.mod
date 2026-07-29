@@ -1,6 +1,6 @@
 name = "Lfan-ke/moonasgi"
 
-version = "0.6.1"
+version = "1.0.0"
 
 readme = "README.md"
 
