@@ -1,4 +1,21 @@
 ///|
+/// Choose the subprotocol to accept from those the client offered (RFC 6455 §4.1): the first of the
+/// client's offered `subprotocols`, in the client's own order of preference, that the server also
+/// lists in `supported`; `None` when the two share none (the connection then proceeds with no
+/// subprotocol). The result is what the app hands to `WebSocketAccept(subprotocol=..)`.
+pub fn WebSocketScope::select_subprotocol(
+  self : WebSocketScope,
+  supported : Array[String],
+) -> String? {
+  for offered in self.subprotocols {
+    if supported.contains(offered) {
+      return Some(offered)
+    }
+  }
+  None
+}
+
+///|
 /// A message crossing a WebSocket in either direction: a UTF-8 `Text` frame or a
 /// `Binary` frame. The ergonomic form of `WebSocketReceive` / `WebSocketSendText`
 /// / `WebSocketSendBytes`, so a `WebSocketHandler` reasons over messages instead
