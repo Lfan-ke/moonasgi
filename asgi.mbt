@@ -32,7 +32,7 @@ pub fn AsgiVersion::default() -> AsgiVersion {
 /// `http.response.push` / `http.response.pathsend` / `http.response.early_hint`),
 /// and the `raw_path` guarantee.
 pub fn AsgiVersion::http() -> AsgiVersion {
-  { version: "3.0", spec_version: "2.5" }
+  { version: "3.0", spec_version: "2.5", }
 }
 
 ///|
@@ -40,7 +40,7 @@ pub fn AsgiVersion::http() -> AsgiVersion {
 /// revision that adds `reason` to the disconnect event, alongside `state` and the
 /// `websocket.http.response` denial extension.
 pub fn AsgiVersion::websocket() -> AsgiVersion {
-  { version: "3.0", spec_version: "2.5" }
+  { version: "3.0", spec_version: "2.5", }
 }
 
 ///|
@@ -48,7 +48,7 @@ pub fn AsgiVersion::websocket() -> AsgiVersion {
 /// that carries `state`). Lifespan versions independently of http/websocket, so
 /// a lifespan scope must not borrow the http `spec_version`.
 pub fn AsgiVersion::lifespan() -> AsgiVersion {
-  { version: "3.0", spec_version: "2.0" }
+  { version: "3.0", spec_version: "2.0", }
 }
 
 ///|
@@ -132,33 +132,33 @@ pub fn Extensions::none() -> Extensions {
 ///|
 /// Advertise the server-push extension (`http.response.push`).
 pub fn Extensions::enable_push(self : Extensions) -> Extensions {
-  { ..self, http_response_push: true }
+  { ..self, http_response_push: true, }
 }
 
 ///|
 /// Advertise the response-trailers extension (`http.response.trailers`).
 pub fn Extensions::enable_trailers(self : Extensions) -> Extensions {
-  { ..self, http_response_trailers: true }
+  { ..self, http_response_trailers: true, }
 }
 
 ///|
 /// Advertise the path-send extension (`http.response.pathsend`).
 pub fn Extensions::enable_pathsend(self : Extensions) -> Extensions {
-  { ..self, http_response_pathsend: true }
+  { ..self, http_response_pathsend: true, }
 }
 
 ///|
 /// Advertise the zero-copy-send extension (`http.response.zerocopysend`): the
 /// server will send the contents of an open file descriptor with zero copies.
 pub fn Extensions::enable_zerocopysend(self : Extensions) -> Extensions {
-  { ..self, http_response_zerocopysend: true }
+  { ..self, http_response_zerocopysend: true, }
 }
 
 ///|
 /// Advertise the debug extension (`http.response.debug`). Per the ASGI spec this
 /// is for testing only and production servers should not implement it.
 pub fn Extensions::enable_debug(self : Extensions) -> Extensions {
-  { ..self, http_response_debug: true }
+  { ..self, http_response_debug: true, }
 }
 
 ///|
@@ -166,7 +166,7 @@ pub fn Extensions::enable_debug(self : Extensions) -> Extensions {
 /// will forward `HttpResponseEarlyHint` messages as `103 Early Hints`
 /// informational responses ahead of the final status.
 pub fn Extensions::enable_early_hint(self : Extensions) -> Extensions {
-  { ..self, http_response_early_hint: true }
+  { ..self, http_response_early_hint: true, }
 }
 
 ///|
@@ -175,7 +175,7 @@ pub fn Extensions::enable_early_hint(self : Extensions) -> Extensions {
 pub fn Extensions::enable_websocket_http_response(
   self : Extensions,
 ) -> Extensions {
-  { ..self, websocket_http_response: true }
+  { ..self, websocket_http_response: true, }
 }
 
 ///|
@@ -184,7 +184,7 @@ pub fn Extensions::with_tls(
   self : Extensions,
   tls : TlsExtension,
 ) -> Extensions {
-  { ..self, tls: Some(tls) }
+  { ..self, tls: Some(tls), }
 }
 
 ///|
@@ -321,7 +321,7 @@ pub fn LifespanScope::new(
   asgi? : AsgiVersion = AsgiVersion::lifespan(),
   state? : Map[String, Json] = Map([]),
 ) -> LifespanScope {
-  { asgi, state }
+  { asgi, state, }
 }
 
 ///|

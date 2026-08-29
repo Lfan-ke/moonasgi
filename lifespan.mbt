@@ -32,7 +32,7 @@ pub fn LifespanHandler::new(
   on_startup? : (LifespanScope) -> LifespanReply = fn(_s) { Complete },
   on_shutdown? : (LifespanScope) -> LifespanReply = fn(_s) { Complete },
 ) -> LifespanHandler {
-  { on_startup, on_shutdown }
+  { on_startup, on_shutdown, }
 }
 
 ///|

@@ -48,7 +48,7 @@ pub fn StreamingResponse::new(
   trailers? : Array[(String, String)] = [],
   early_hints? : Array[Array[String]] = [],
 ) -> StreamingResponse {
-  { status, headers, chunks, trailers, early_hints }
+  { status, headers, chunks, trailers, early_hints, }
 }
 
 ///|
@@ -109,7 +109,7 @@ pub fn Response::new(
   headers : Array[(String, String)],
   body : Bytes,
 ) -> Response {
-  { status, headers, body }
+  { status, headers, body, }
 }
 
 ///|

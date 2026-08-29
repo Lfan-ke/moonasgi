@@ -113,10 +113,10 @@ fn reassemble(events : Array[Event]) -> TestResponse {
           trailers.push(pair)
         }
       HttpResponsePush(path=p, headers=h) =>
-        pushes.push({ path: p, headers: h })
+        pushes.push({ path: p, headers: h, })
       HttpResponsePathSend(path=p) => pathsend = Some(p)
       HttpResponseZeroCopySend(fd~, offset~, count~, more_body=_) =>
-        zerocopysend = Some({ fd, offset, count })
+        zerocopysend = Some({ fd, offset, count, })
       HttpResponseDebug(info~) => debug.push(info)
       HttpResponseEarlyHint(links=l) => early_hints.push(l)
       _ => ()
@@ -164,7 +164,7 @@ pub fn TestClient::from_app(
   server? : (String, Int?)? = Some(("testserver", Some(80))),
   extensions? : Extensions = Extensions::none(),
 ) -> TestClient {
-  { app, root_path, base_headers, client, server, extensions }
+  { app, root_path, base_headers, client, server, extensions, }
 }
 
 ///|

@@ -373,7 +373,7 @@ pub fn run_conformance() -> ConformanceReport {
   ]
   for vc in ver_cases {
     let (sv, maj, minr, want) = vc
-    let v : AsgiVersion = { version: "3.0", spec_version: sv }
+    let v : AsgiVersion = { version: "3.0", spec_version: sv, }
     check(
       "spec_version/" + sv + ">=" + maj.to_string() + "." + minr.to_string(),
       v.at_least(major=maj, minor=minr) == want,

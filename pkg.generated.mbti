@@ -1,0 +1,357 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Lfan-ke/moonasgi"
+
+// Values
+pub fn compose(Array[((Request) -> Response) -> (Request) -> Response], (Request) -> Response) -> (Request) -> Response
+
+pub fn double_to_single_callable((Scope) -> async (async () -> Event, async (Event) -> Unit) -> Unit) -> async (Scope, async () -> Event, async (Event) -> Unit) -> Unit
+
+pub fn guarantee_single_callable(AsgiApplication) -> async (Scope, async () -> Event, async (Event) -> Unit) -> Unit
+
+pub fn headers_from_wire(Array[(Bytes, Bytes)]) -> Array[(String, String)]
+
+pub fn headers_to_wire(Array[(String, String)]) -> Array[(Bytes, Bytes)]
+
+pub fn latin1_decode(Bytes) -> String
+
+pub fn latin1_encode(String) -> Bytes
+
+pub fn run_conformance() -> ConformanceReport
+
+pub fn run_http((Request) -> Response, Scope, Array[Event]) -> Array[Event]
+
+pub fn run_http_app((Request) -> Array[Event], Scope, Array[Event]) -> Array[Event]
+
+pub fn run_http_scoped((HttpScope, Bytes) -> Array[Event], Scope, Array[Event]) -> Array[Event]
+
+pub fn run_http_stream((Request) -> StreamingResponse, Scope, Array[Event]) -> Array[Event]
+
+pub fn run_legacy((Scope) -> (Array[Event]) -> Array[Event], Scope, Array[Event]) -> Array[Event]
+
+pub fn run_lifespan(LifespanHandler, Scope, Array[Event]) -> Array[Event]
+
+pub fn to_asgi((Request) -> Response) -> async (Scope, async () -> Event, async (Event) -> Unit) -> Unit
+
+pub fn validate_events(Scope, Array[Event]) -> EventOrderError?
+
+pub fn validate_http_response(Array[Event]) -> EventOrderError?
+
+pub fn validate_lifespan_replies(Array[Event]) -> EventOrderError?
+
+pub fn validate_ws_response(Array[Event]) -> EventOrderError?
+
+pub fn ws_run(WebSocketHandler, Scope, Array[Event]) -> Array[Event]
+
+pub fn ws_run_app((WebSocketScope, Array[Event]) -> Array[Event], Scope, Array[Event]) -> Array[Event]
+
+// Errors
+
+// Types and methods
+pub(all) enum AsgiApplication {
+  Single(async (Scope, async () -> Event, async (Event) -> Unit) -> Unit)
+  Legacy((Scope) -> async (async () -> Event, async (Event) -> Unit) -> Unit)
+}
+
+pub(all) struct AsgiVersion {
+  version : String
+  spec_version : String
+} derive(Eq)
+pub fn AsgiVersion::at_least(Self, major~ : Int, minor~ : Int) -> Bool
+pub fn AsgiVersion::default() -> Self
+pub fn AsgiVersion::http() -> Self
+pub fn AsgiVersion::lifespan() -> Self
+pub fn AsgiVersion::websocket() -> Self
+
+pub(all) struct ConformanceReport {
+  total : Int
+  passed : Int
+  failures : Array[String]
+} derive(Eq)
+pub fn ConformanceReport::ok(Self) -> Bool
+
+pub(all) enum Event {
+  HttpRequest(body~ : Bytes, more_body~ : Bool)
+  HttpDisconnect
+  HttpResponseStart(status~ : Int, headers~ : Array[(String, String)], trailers~ : Bool)
+  HttpResponseBody(body~ : Bytes, more_body~ : Bool)
+  HttpResponseTrailers(headers~ : Array[(String, String)], more_trailers~ : Bool)
+  HttpResponsePush(path~ : String, headers~ : Array[(String, String)])
+  HttpResponsePathSend(path~ : String)
+  HttpResponseZeroCopySend(fd~ : Int, offset~ : Int?, count~ : Int?, more_body~ : Bool)
+  HttpResponseDebug(info~ : Json)
+  HttpResponseEarlyHint(links~ : Array[String])
+  WebSocketConnect
+  WebSocketReceive(text~ : String?, bytes~ : Bytes?)
+  WebSocketDisconnect(code~ : Int, reason~ : String?)
+  WebSocketAccept(subprotocol~ : String?, headers~ : Array[(String, String)])
+  WebSocketSendText(String)
+  WebSocketSendBytes(Bytes)
+  WebSocketClose(code~ : Int, reason~ : String)
+  WebSocketHttpResponseStart(status~ : Int, headers~ : Array[(String, String)])
+  WebSocketHttpResponseBody(body~ : Bytes, more_body~ : Bool)
+  LifespanStartup
+  LifespanShutdown
+  LifespanStartupComplete
+  LifespanStartupFailed(message~ : String)
+  LifespanShutdownComplete
+  LifespanShutdownFailed(message~ : String)
+} derive(Eq)
+
+pub(all) enum EventOrderError {
+  BodyBeforeStart
+  DuplicateResponseStart
+  EarlyHintAfterStart
+  BodyAfterComplete
+  UnexpectedTrailers
+  TrailersBeforeBody
+  MissingResponseStart
+  IncompleteBody
+  MissingTrailers
+  EventAfterComplete
+  FrameBeforeAccept
+  DuplicateAccept
+  EventAfterClose
+  DenialBodyBeforeStart
+  DenialAfterAccept
+  AcceptAfterDenial
+  IncompleteDenial
+  MissingHandshakeReply
+  DuplicateLifespanReply
+  ShutdownBeforeStartup
+  NonResponseEvent
+} derive(Eq)
+pub fn EventOrderError::describe(Self) -> String
+
+pub(all) struct Extensions {
+  tls : TlsExtension?
+  http_response_push : Bool
+  http_response_trailers : Bool
+  http_response_pathsend : Bool
+  http_response_zerocopysend : Bool
+  http_response_early_hint : Bool
+  http_response_debug : Bool
+  websocket_http_response : Bool
+} derive(Eq)
+pub fn Extensions::enable_debug(Self) -> Self
+pub fn Extensions::enable_early_hint(Self) -> Self
+pub fn Extensions::enable_pathsend(Self) -> Self
+pub fn Extensions::enable_push(Self) -> Self
+pub fn Extensions::enable_trailers(Self) -> Self
+pub fn Extensions::enable_websocket_http_response(Self) -> Self
+pub fn Extensions::enable_zerocopysend(Self) -> Self
+pub fn Extensions::none() -> Self
+pub fn Extensions::with_tls(Self, TlsExtension) -> Self
+
+pub(all) enum Http2HeaderError {
+  MissingMethod
+  MissingScheme
+  MissingPath
+  EmptyPath
+  DuplicatePseudoHeader(String)
+  UnknownPseudoHeader(String)
+  PseudoHeaderAfterRegular(String)
+} derive(Eq)
+
+pub(all) struct HttpScope {
+  http_version : String
+  http_method : String
+  scheme : String
+  path : String
+  raw_path : Bytes
+  query_string : Bytes
+  root_path : String
+  headers : Array[(String, String)]
+  client : (String, Int)?
+  server : (String, Int?)?
+  asgi : AsgiVersion
+  extensions : Extensions
+  state : Map[String, Json]
+}
+pub fn HttpScope::from_h2_headers(Array[(String, String)], http_version? : String, root_path? : String, client? : (String, Int)?, server? : (String, Int?)?, extensions? : Extensions, asgi? : AsgiVersion, state? : Map[String, Json]) -> Result[Self, Http2HeaderError]
+pub fn HttpScope::new(http_method~ : String, path~ : String, http_version? : String, scheme? : String, raw_path? : Bytes, query_string? : Bytes, root_path? : String, headers? : Array[(String, String)], client? : (String, Int)?, server? : (String, Int?)?, asgi? : AsgiVersion, extensions? : Extensions, state? : Map[String, Json]) -> Self
+
+pub(all) struct LifespanHandler {
+  on_startup : (LifespanScope) -> LifespanReply
+  on_shutdown : (LifespanScope) -> LifespanReply
+}
+pub fn LifespanHandler::new(on_startup? : (LifespanScope) -> LifespanReply, on_shutdown? : (LifespanScope) -> LifespanReply) -> Self
+
+pub(all) enum LifespanReply {
+  Complete
+  Failed(message~ : String)
+} derive(Eq)
+
+pub(all) struct LifespanScope {
+  asgi : AsgiVersion
+  state : Map[String, Json]
+}
+pub fn LifespanScope::new(asgi? : AsgiVersion, state? : Map[String, Json]) -> Self
+
+pub(all) struct PushPromise {
+  path : String
+  headers : Array[(String, String)]
+} derive(Eq)
+pub fn PushPromise::header(Self, String) -> String?
+
+pub(all) struct Request {
+  http_method : String
+  path : String
+  query_string : Bytes
+  headers : Array[(String, String)]
+  body : Bytes
+} derive(Eq)
+pub fn Request::header(Self, String) -> String?
+
+pub(all) struct Response {
+  status : Int
+  headers : Array[(String, String)]
+  body : Bytes
+} derive(Eq)
+pub fn Response::events(Self) -> Array[Event]
+pub fn Response::header(Self, String) -> String?
+pub fn Response::json(status? : Int, Json) -> Self
+pub fn Response::new(Int, Array[(String, String)], Bytes) -> Self
+pub fn Response::text(status? : Int, String) -> Self
+
+pub(all) enum Scope {
+  Http(HttpScope)
+  WebSocket(WebSocketScope)
+  Lifespan(LifespanScope)
+}
+
+pub(all) struct StreamingResponse {
+  status : Int
+  headers : Array[(String, String)]
+  chunks : Array[Bytes]
+  trailers : Array[(String, String)]
+  early_hints : Array[Array[String]]
+} derive(Eq)
+pub fn StreamingResponse::events(Self) -> Array[Event]
+pub fn StreamingResponse::new(chunks~ : Array[Bytes], status? : Int, headers? : Array[(String, String)], trailers? : Array[(String, String)], early_hints? : Array[Array[String]]) -> Self
+
+pub(all) struct TestClient {
+  app : (Request) -> Array[Event]
+  root_path : String
+  base_headers : Array[(String, String)]
+  client : (String, Int)?
+  server : (String, Int?)?
+  extensions : Extensions
+}
+pub fn TestClient::delete(Self, String, headers? : Array[(String, String)]) -> TestResponse
+pub fn TestClient::from_app((Request) -> Array[Event], root_path? : String, base_headers? : Array[(String, String)], client? : (String, Int)?, server? : (String, Int?)?, extensions? : Extensions) -> Self
+pub fn TestClient::from_stream((Request) -> StreamingResponse, root_path? : String, base_headers? : Array[(String, String)], client? : (String, Int)?, server? : (String, Int?)?, extensions? : Extensions) -> Self
+pub fn TestClient::get(Self, String, headers? : Array[(String, String)]) -> TestResponse
+pub fn TestClient::head(Self, String, headers? : Array[(String, String)]) -> TestResponse
+pub fn TestClient::new((Request) -> Response, root_path? : String, base_headers? : Array[(String, String)], client? : (String, Int)?, server? : (String, Int?)?, extensions? : Extensions) -> Self
+pub fn TestClient::patch(Self, String, body? : Bytes, headers? : Array[(String, String)]) -> TestResponse
+pub fn TestClient::post(Self, String, body? : Bytes, headers? : Array[(String, String)]) -> TestResponse
+pub fn TestClient::put(Self, String, body? : Bytes, headers? : Array[(String, String)]) -> TestResponse
+pub fn TestClient::request(Self, http_method~ : String, path~ : String, headers? : Array[(String, String)], body? : Bytes, http_version? : String, chunks? : Array[Bytes]) -> TestResponse
+pub fn TestClient::websocket(Self, path~ : String, handler~ : WebSocketHandler, send? : Array[WsMessage], headers? : Array[(String, String)], subprotocols? : Array[String], disconnect? : Int?) -> WsTestSession
+pub fn TestClient::websocket_app(Self, path~ : String, app~ : (WebSocketScope, Array[Event]) -> Array[Event], send? : Array[WsMessage], headers? : Array[(String, String)], subprotocols? : Array[String], disconnect? : Int?) -> WsTestSession
+
+pub(all) struct TestResponse {
+  status : Int
+  headers : Array[(String, String)]
+  body : Bytes
+  trailers : Array[(String, String)]
+  pushes : Array[PushPromise]
+  pathsend : String?
+  zerocopysend : ZeroCopySend?
+  debug : Array[Json]
+  early_hints : Array[Array[String]]
+} derive(Eq)
+pub fn TestResponse::header(Self, String) -> String?
+pub fn TestResponse::json(Self) -> Json raise
+pub fn TestResponse::text(Self) -> String
+pub fn TestResponse::trailer(Self, String) -> String?
+
+pub(all) struct TlsExtension {
+  server_cert : String?
+  client_cert_chain : Array[String]
+  client_cert_name : String?
+  client_cert_error : String?
+  tls_version : Int?
+  cipher_suite : Int?
+} derive(Eq)
+
+pub(all) struct WebSocketHandler {
+  on_connect : (WebSocketScope) -> WsAccept
+  on_receive : (WsMessage) -> Array[WsSend]
+  on_disconnect : (Int, String?) -> Array[WsSend]
+}
+pub fn WebSocketHandler::echo(subprotocol? : String?) -> Self
+pub fn WebSocketHandler::new(on_connect? : (WebSocketScope) -> WsAccept, on_receive? : (WsMessage) -> Array[WsSend], on_disconnect? : (Int, String?) -> Array[WsSend]) -> Self
+
+pub(all) struct WebSocketScope {
+  http_version : String
+  scheme : String
+  path : String
+  raw_path : Bytes
+  query_string : Bytes
+  root_path : String
+  headers : Array[(String, String)]
+  client : (String, Int)?
+  server : (String, Int?)?
+  subprotocols : Array[String]
+  asgi : AsgiVersion
+  extensions : Extensions
+  state : Map[String, Json]
+}
+pub fn WebSocketScope::new(path~ : String, http_version? : String, scheme? : String, raw_path? : Bytes, query_string? : Bytes, root_path? : String, headers? : Array[(String, String)], client? : (String, Int)?, server? : (String, Int?)?, subprotocols? : Array[String], asgi? : AsgiVersion, extensions? : Extensions, state? : Map[String, Json]) -> Self
+pub fn WebSocketScope::select_subprotocol(Self, Array[String]) -> String?
+
+pub(all) enum WsAccept {
+  Accept(subprotocol~ : String?, headers~ : Array[(String, String)])
+  Reject(code~ : Int, reason~ : String)
+  DenyHttp(status~ : Int, headers~ : Array[(String, String)], body~ : Bytes)
+} derive(Eq)
+
+pub(all) enum WsMessage {
+  Text(String)
+  Binary(Bytes)
+} derive(Eq)
+
+pub(all) enum WsSend {
+  SendText(String)
+  SendBinary(Bytes)
+  Close(code~ : Int, reason~ : String)
+} derive(Eq)
+
+pub(all) struct WsTestSession {
+  accepted : Bool
+  subprotocol : String?
+  accept_headers : Array[(String, String)]
+  messages : Array[WsMessage]
+  closed : Bool
+  close_code : Int?
+  close_reason : String?
+  denial : TestResponse?
+} derive(Eq)
+pub fn WsTestSession::header(Self, String) -> String?
+pub fn WsTestSession::texts(Self) -> Array[String]
+
+pub(all) struct ZeroCopySend {
+  fd : Int
+  offset : Int?
+  count : Int?
+} derive(Eq)
+
+// Type aliases
+pub type AsgiApp = async (Scope, async () -> Event, async (Event) -> Unit) -> Unit
+
+pub type AsgiAppInstance = async (async () -> Event, async (Event) -> Unit) -> Unit
+
+pub type Handler = (Request) -> Response
+
+pub type LegacyAsgiApp = (Scope) -> async (async () -> Event, async (Event) -> Unit) -> Unit
+
+pub type Middleware = ((Request) -> Response) -> (Request) -> Response
+
+pub type Receive = async () -> Event
+
+pub type Send = async (Event) -> Unit
+
+pub type StreamHandler = (Request) -> StreamingResponse
+
+// Traits

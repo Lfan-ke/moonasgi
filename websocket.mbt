@@ -78,7 +78,7 @@ pub fn WebSocketHandler::new(
   on_receive? : (WsMessage) -> Array[WsSend] = fn(_m) { [] },
   on_disconnect? : (Int, String?) -> Array[WsSend] = fn(_c, _r) { [] },
 ) -> WebSocketHandler {
-  { on_connect, on_receive, on_disconnect }
+  { on_connect, on_receive, on_disconnect, }
 }
 
 ///|

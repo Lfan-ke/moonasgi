@@ -10,7 +10,7 @@
 /// Decode a raw byte string to a latin-1 String: each byte becomes the character
 /// with that code point. Total — every byte 0x00..0xFF is a valid code point.
 pub fn latin1_decode(bytes : Bytes) -> String {
-  let sb = StringBuilder::new()
+  let sb = StringBuilder()
   for i = 0; i < bytes.length(); i = i + 1 {
     sb.write_char(bytes[i].to_int().unsafe_to_char())
   }

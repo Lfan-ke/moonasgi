@@ -226,7 +226,7 @@ test "AsgiVersion negotiates spec_version numerically" {
   assert_eq(v.at_least(major=2, minor=6), false)
   assert_eq(v.at_least(major=1, minor=9), true)
   assert_eq(v.at_least(major=3, minor=0), false)
-  let old : AsgiVersion = { version: "3.0", spec_version: "2.10" }
+  let old : AsgiVersion = { version: "3.0", spec_version: "2.10", }
   assert_eq(old.at_least(major=2, minor=9), true)
 }
 
