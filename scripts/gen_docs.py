@@ -40,8 +40,16 @@ SECTIONS = [
      "The ASGI ordering rules as code: validate_events walks an outbound stream "
      "and names the first violation (a body before the response starts, a frame "
      "before the handshake, and the rest), so a server can reject a buggy app."),
+    ("headers", "headers.mbt", "Headers",
+     "The header representation both sides of the seam share: case-insensitive "
+     "lookup over the raw byte pairs ASGI carries, without copying them into a map "
+     "that would lose duplicates."),
+    ("legacy", "legacy.mbt", "ASGI 2.0 applications",
+     "The legacy double-callable convention a 3.0 server is encouraged to keep "
+     "running. MoonBit has no signature reflection, so there is no equivalent of "
+     "asgiref's guarantee_single_callable: the two conventions are distinct types "
+     "and the choice is an explicit constructor."),
 ]
-
 KIND = {"struct": "struct", "enum": "enum", "fn": "fn", "type": "type", "let": "let"}
 
 
@@ -251,7 +259,8 @@ def main():
     for sid, rel, title, desc in SECTIONS:
         body.append('<section class="pkg" id="%s"><h2><span class="at">§</span>%s</h2>'
                     '<p class="pdesc">%s</p>' % (sid, title, esc(desc)))
-        for kind, sig, doc in parse(ROOT / rel):
+        files = rel if isinstance(rel, tuple) else (rel,)
+        for kind, sig, doc in [it for f in files for it in parse(ROOT / f)]:
             total += 1
             body.append('<div class="item" data-k="%s"><span class="kind">%s</span>'
                         '<pre class="sig">%s</pre>%s</div>'
