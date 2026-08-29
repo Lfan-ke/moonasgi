@@ -411,7 +411,7 @@ fn reassemble_ws(events : Array[Event]) -> WsTestSession {
         close_code = Some(code)
         close_reason = Some(reason)
       }
-      WebSocketHttpResponseStart(status~, headers~) => {
+      WebSocketHttpResponseStart(status~, headers~, ..) => {
         had_denial = true
         denial_status = status
         denial_headers = headers

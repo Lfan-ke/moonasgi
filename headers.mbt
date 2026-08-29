@@ -18,13 +18,23 @@ pub fn latin1_decode(bytes : Bytes) -> String {
 }
 
 ///|
-/// Encode a latin-1 String back to its byte string: each character's low byte. The
-/// inverse of `latin1_decode`. Header field values are always latin-1 (code points
-/// 0..255) by HTTP's own rules, so the low byte is the whole character.
+/// Encode a String back to a header byte string. The inverse of `latin1_decode` for
+/// anything that came from the wire, since HTTP header values are latin-1 by the
+/// protocol's own rules.
+///
+/// A character above U+00FF never came off a wire — it was put there by a framework
+/// setting, say, a `content-disposition` filename — and truncating it to its low byte
+/// would silently corrupt it. Those are written as their UTF-8 bytes instead, which is
+/// what real servers emit and what RFC 6266 §4.3 expects a recipient to decode.
 pub fn latin1_encode(s : String) -> Bytes {
   let buf = Buffer()
   for c in s {
-    buf.write_byte((c.to_int() & 0xff).to_byte())
+    let code = c.to_int()
+    if code <= 0xff {
+      buf.write_byte(code.to_byte())
+    } else {
+      buf.write_bytes(@utf8.encode(c.to_string()))
+    }
   }
   buf.to_bytes()
 }

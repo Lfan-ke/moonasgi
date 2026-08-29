@@ -14,3 +14,12 @@ test "ASGI 3.0 conformance harness is all-green" {
   // scope-aware-core tables.
   assert_eq(report.total > 350, true)
 }
+
+///|
+/// The README quotes the harness size. Pin it here so the number cannot drift
+/// unnoticed the way it did before — a check added without updating the prose
+/// fails this rather than leaving the documentation quietly wrong.
+test "the conformance harness runs the number of checks the README claims" {
+  let report = run_conformance()
+  assert_eq(report.total, 428)
+}

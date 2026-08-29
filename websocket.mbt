@@ -158,7 +158,9 @@ fn drive_ws(
             closed = true
           }
           DenyHttp(status~, headers~, body~) => {
-            out.push(WebSocketHttpResponseStart(status~, headers~))
+            out.push(
+              WebSocketHttpResponseStart(status~, headers~, trailers=false),
+            )
             out.push(WebSocketHttpResponseBody(body~, more_body=false))
             closed = true
           }

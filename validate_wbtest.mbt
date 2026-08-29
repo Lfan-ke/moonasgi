@@ -135,3 +135,36 @@ test "zerocopysend and debug extensions round-trip through the TestClient" {
   assert_eq(r.debug.length(), 1)
   assert_eq(r.debug[0], { "handler": "files" }.to_json())
 }
+
+///|
+/// A message type the server and application agreed on privately rides through the
+/// validator: the spec lets them invent their own, so an unknown type is not the
+/// same thing as a message from the wrong scope.
+test "a custom event type is neither rejected nor counted" {
+  let scope = Scope::Http(
+    HttpScope::new(http_method="GET", path="/", http_version="1.1"),
+  )
+  let ok = validate_events(scope, [
+    Event::HttpResponseStart(status=200, headers=[], trailers=false),
+    Event::Other(type_="mychat.message", payload={ "text": "hhh" }.to_json()),
+    Event::HttpResponseBody(body=b"", more_body=false),
+  ])
+  assert_eq(ok is None, true)
+  // It does not stand in for the response either.
+  let missing = validate_events(scope, [
+    Event::Other(type_="mychat.message", payload=Json::null()),
+  ])
+  assert_eq(missing is Some(MissingResponseStart), true)
+}
+
+///|
+/// A server advertises an extension this seam does not name, and an application
+/// finds it by name.
+test "custom extensions are advertised and read back by name" {
+  let ext = Extensions::none().enable(
+    "mychat.presence",
+    value={ "max": 233 }.to_json(),
+  )
+  assert_eq(ext.get("mychat.presence") is Some(_), true)
+  assert_eq(ext.get("nope") is None, true)
+}

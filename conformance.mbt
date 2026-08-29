@@ -43,7 +43,7 @@ fn all_event_variants() -> Array[Event] {
     WebSocketSendText("hi"),
     WebSocketSendBytes(b"hi"),
     WebSocketClose(code=1001, reason="bye"),
-    WebSocketHttpResponseStart(status=403, headers=[]),
+    WebSocketHttpResponseStart(status=403, headers=[], trailers=false),
     WebSocketHttpResponseBody(body=b"no", more_body=false),
     LifespanStartup,
     LifespanShutdown,
@@ -408,17 +408,12 @@ pub fn run_conformance() -> ConformanceReport {
     ),
     ("start+pathsend", [ok_start, HttpResponsePathSend(path="/f")]),
     (
-      "push+start+body",
-      [HttpResponsePush(path="/p", headers=[]), ok_start, ok_body],
+      "start+push+body",
+      [ok_start, HttpResponsePush(path="/p", headers=[]), ok_body],
     ),
+    // The debug message goes once, ahead of the response it annotates.
     (
-      "start+debug+body",
-      [ok_start, HttpResponseDebug(info={ "k": "v" }.to_json()), ok_body],
-    ),
-    // http.response.debug is out-of-band and valid at any point, including
-    // before the response starts.
-    (
-      "debug-before-start",
+      "debug+start+body",
       [HttpResponseDebug(info={ "k": "v" }.to_json()), ok_start, ok_body],
     ),
   ]
@@ -427,6 +422,35 @@ pub fn run_conformance() -> ConformanceReport {
   }
   let bad_http : Array[(String, Array[Event], EventOrderError)] = [
     ("body-before-start", [ok_body], BodyBeforeStart),
+    (
+      "push-before-start",
+      [HttpResponsePush(path="/p", headers=[]), ok_start, ok_body],
+      PushBeforeStart,
+    ),
+    (
+      "debug-after-start",
+      [ok_start, HttpResponseDebug(info={ "k": "v" }.to_json()), ok_body],
+      DebugAfterStart,
+    ),
+    (
+      "debug-twice",
+      [
+        HttpResponseDebug(info={ "k": "v" }.to_json()),
+        HttpResponseDebug(info={ "k": "w" }.to_json()),
+        ok_start,
+        ok_body,
+      ],
+      DuplicateDebug,
+    ),
+    (
+      "pathsend-after-body",
+      [
+        ok_start,
+        HttpResponseBody(body=b"partial", more_body=true),
+        HttpResponsePathSend(path="/f"),
+      ],
+      PathSendMixedWithBody,
+    ),
     (
       "zerocopy-before-start",
       [HttpResponseZeroCopySend(fd=1, offset=None, count=None, more_body=false)],
@@ -463,7 +487,11 @@ pub fn run_conformance() -> ConformanceReport {
     check("order/http-bad/" + bc.0, validate_events(hscope, bc.1) == Some(bc.2))
   }
   let ws_accept = WebSocketAccept(subprotocol=None, headers=[])
-  let ws_deny_start = WebSocketHttpResponseStart(status=403, headers=[])
+  let ws_deny_start = WebSocketHttpResponseStart(
+    status=403,
+    headers=[],
+    trailers=false,
+  )
   let valid_ws : Array[(String, Array[Event])] = [
     ("accept", [ws_accept]),
     (

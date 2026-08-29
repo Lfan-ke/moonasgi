@@ -122,7 +122,7 @@ A malformed pseudo-header set — a missing required one, a duplicate, an unknow
 
 ## Conformance
 
-`run_conformance()` is a table-driven harness that drives **every** `Event` variant and **every** `Scope` field through `run_http` / `ws_run` / `TestClient` and asserts round-trip fidelity — a value put in comes back unchanged, and no two distinct events or scope shapes are confused. It returns a `ConformanceReport` naming any failing check, so a downstream server can self-verify the seam wiring:
+`run_conformance()` is a table-driven harness. Every `Event` variant is checked for round-trip fidelity and for being distinct from every other one; the http, websocket and lifespan scopes and their ordering rules are driven through `run_http` / `ws_run` / `TestClient`. The out-of-band extension messages — push, pathsend, zero-copy send, debug, disconnect — are covered by the ordering tables rather than by a driver, since no driver emits them. It returns a `ConformanceReport` naming any failing check, so a downstream server can self-verify the seam wiring:
 
 ```moonbit
 let report = run_conformance()
@@ -184,7 +184,7 @@ Every ASGI 3.0 spec feature, and the test that exercises it. `conformance` is `r
 | HTTP/2·3 pseudo-header → scope lowering (`:method`/`:scheme`/`:authority`/`:path`, host synthesis, malformed rejection) | `HttpScope::from_h2_headers` / `Http2HeaderError` | `conformance` h2/* |
 | `http_version` transport-agnostic seam (`"1.1"` / `"2"` / `"3"`) | `HttpScope.http_version` | `conformance` h2/seam-agnostic |
 
-The one spec feature with no direct model is the C-level file object in `http.response.zerocopysend`: this seam is socket-free by design, so the file descriptor is carried as an `Int` fd and the actual `sendfile` is the server adapter's (`mooncat`) job.
+Two spec features have no direct model here. The C-level file object in `http.response.zerocopysend` is carried as an `Int` fd, because this seam is socket-free by design and the actual `sendfile` is the server adapter's (`mooncat`) job. And `send()` cannot raise on a closed connection, which the www sub-spec has required since version 2.4: `Send` is declared `async (Event) -> Unit`, so a server has no in-band way to tell an application the client went away mid-response. A body drain reports it — `run_http_scoped_drain` hands the app a `Drain` saying whether the client disconnected — but the send path does not.
 
 ## Consumed by
 
@@ -205,7 +205,7 @@ The `greet: *` whitebox tests assemble a representative app across all three sha
 
 ## Status
 
-`v0` — the SEAM (`Scope`, `Event`, `Receive`/`Send`/`AsgiApp`, `Request`/`Response`, `Handler`/`Middleware`) plus the full ASGI-extension event set (push, pathsend, zero-copy send, trailers, early hints, debug, WebSocket denial, TLS), `StreamingResponse` response streaming, the synchronous `run_http`, `run_http_scoped`, `run_lifespan`, and `ws_run` cores, the `TestClient` in-process driver for both HTTP and WebSocket, the `run_conformance` round-trip harness (416 checks) with its `validate_events` ordering table, `HttpScope::from_h2_headers` HTTP/2·3 pseudo-header lowering, and typed `Extensions`/`tls`/`spec_version` (2.5) scope metadata — 40 tests, warning-clean across every backend. The async `Handler → AsgiApp` runtime adapter lands with `mooncat`, which owns the native async transport.
+`v0` — the SEAM (`Scope`, `Event`, `Receive`/`Send`/`AsgiApp`, `Request`/`Response`, `Handler`/`Middleware`) plus the full ASGI-extension event set (push, pathsend, zero-copy send, trailers, early hints, debug, WebSocket denial, TLS), `StreamingResponse` response streaming, the synchronous `run_http`, `run_http_scoped`, `run_lifespan`, and `ws_run` cores, the `TestClient` in-process driver for both HTTP and WebSocket, the `run_conformance` round-trip harness (428 checks) with its `validate_events` ordering table, `HttpScope::from_h2_headers` HTTP/2·3 pseudo-header lowering, and typed `Extensions`/`tls`/`spec_version` (2.5) scope metadata — 51 tests, warning-clean across every backend. The async `Handler → AsgiApp` runtime adapter lands with `mooncat`, which owns the native async transport.
 
 ## License
 

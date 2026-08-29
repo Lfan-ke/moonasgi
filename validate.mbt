@@ -18,6 +18,11 @@ pub(all) enum EventOrderError {
   IncompleteBody
   MissingTrailers
   EventAfterComplete
+  DebugAfterStart
+  DuplicateDebug
+  PushBeforeStart
+  PathSendMixedWithBody
+  IllegalResponseHeader
   // WebSocket ordering.
   FrameBeforeAccept
   DuplicateAccept
@@ -51,6 +56,13 @@ pub fn EventOrderError::describe(self : EventOrderError) -> String {
     IncompleteBody => "stream ended before a final body (more_body was true)"
     MissingTrailers => "start promised trailers but none were sent"
     EventAfterComplete => "an event after the response was fully sent"
+    DebugAfterStart => "http.response.debug after http.response.start"
+    DuplicateDebug => "a second http.response.debug"
+    PushBeforeStart => "http.response.push before http.response.start"
+    PathSendMixedWithBody =>
+      "http.response.pathsend mixed with http.response.body"
+    IllegalResponseHeader =>
+      "a pseudo-header, or sec-websocket-protocol on an accept, in a response header list"
     FrameBeforeAccept => "a websocket frame before websocket.accept"
     DuplicateAccept => "a second websocket.accept"
     EventAfterClose => "an event after the websocket was closed"
@@ -68,31 +80,56 @@ pub fn EventOrderError::describe(self : EventOrderError) -> String {
 }
 
 ///|
+/// Whether a response header list carries something the spec forbids there: an HTTP/2
+/// pseudo-header, which a server synthesises from the response itself and an
+/// application must never set.
+fn has_pseudo_header(headers : Array[(String, String)]) -> Bool {
+  for kv in headers {
+    if kv.0.length() > 0 && kv.0[0] == ':' {
+      return true
+    }
+  }
+  false
+}
+
+///|
 /// Validate the outbound event stream an application emits for an http request,
 /// against ASGI's http response ordering: at most one `HttpResponseStart`, no
 /// body or pathsend/zerocopysend before it, early hints only ahead of it, a body
 /// stream that terminates once (`more_body: false`), trailers only when the start
 /// promised them and only after the body completes, and nothing after the
-/// response is fully sent. `HttpResponseDebug` carries no protocol meaning and is
-/// accepted anywhere; `HttpResponsePush` is accepted before or during the
-/// response. Returns the first violation, or `None` for a well-formed complete
-/// response.
+/// response is fully sent. `HttpResponseDebug` must come once and before the start;
+/// `HttpResponsePush` only after it; `HttpResponsePathSend` cannot be mixed with a
+/// body. Returns the first violation, or `None` for a well-formed complete response.
 pub fn validate_http_response(events : Array[Event]) -> EventOrderError? {
   let mut started = false
   let mut complete = false
   let mut trailers_promised = false
   let mut trailers_done = false
+  let mut debug_sent = false
+  let mut body_seen = false
   for ev in events {
     let finished = complete && (!trailers_promised || trailers_done)
     match ev {
-      HttpResponseDebug(..) => ()
+      HttpResponseDebug(..) => {
+        if started {
+          return Some(DebugAfterStart)
+        }
+        if debug_sent {
+          return Some(DuplicateDebug)
+        }
+        debug_sent = true
+      }
       HttpResponseEarlyHint(..) =>
         if started {
           return Some(EarlyHintAfterStart)
         }
-      HttpResponseStart(trailers~, ..) => {
+      HttpResponseStart(trailers~, headers~, ..) => {
         if started {
           return Some(DuplicateResponseStart)
+        }
+        if has_pseudo_header(headers) {
+          return Some(IllegalResponseHeader)
         }
         started = true
         trailers_promised = trailers
@@ -104,6 +141,7 @@ pub fn validate_http_response(events : Array[Event]) -> EventOrderError? {
         if complete {
           return Some(BodyAfterComplete)
         }
+        body_seen = true
         if !more_body {
           complete = true
         }
@@ -126,9 +164,22 @@ pub fn validate_http_response(events : Array[Event]) -> EventOrderError? {
         if complete {
           return Some(BodyAfterComplete)
         }
+        if body_seen {
+          return Some(PathSendMixedWithBody)
+        }
         complete = true
       }
-      HttpResponsePush(..) => if finished { return Some(EventAfterComplete) }
+      HttpResponsePush(headers~, ..) => {
+        if !started {
+          return Some(PushBeforeStart)
+        }
+        if has_pseudo_header(headers) {
+          return Some(IllegalResponseHeader)
+        }
+        if finished {
+          return Some(EventAfterComplete)
+        }
+      }
       HttpResponseTrailers(more_trailers~, ..) => {
         if !trailers_promised {
           return Some(UnexpectedTrailers)
@@ -143,6 +194,9 @@ pub fn validate_http_response(events : Array[Event]) -> EventOrderError? {
           trailers_done = true
         }
       }
+      // A message type the two ends agreed on privately; the spec's ordering
+      // rules say nothing about it, so it neither breaks nor advances the stream.
+      Other(..) => ()
       _ => return Some(NonResponseEvent)
     }
   }
@@ -175,12 +229,20 @@ pub fn validate_ws_response(events : Array[Event]) -> EventOrderError? {
       return Some(EventAfterClose)
     }
     match ev {
-      WebSocketAccept(..) => {
+      WebSocketAccept(headers~, ..) => {
         if accepted {
           return Some(DuplicateAccept)
         }
         if denial_started {
           return Some(AcceptAfterDenial)
+        }
+        // The chosen subprotocol travels in `subprotocol`, so setting the header
+        // as well would let the two disagree.
+        for kv in headers {
+          if kv.0.to_lower() == "sec-websocket-protocol" ||
+            has_pseudo_header([kv]) {
+            return Some(IllegalResponseHeader)
+          }
         }
         accepted = true
       }
@@ -206,6 +268,9 @@ pub fn validate_ws_response(events : Array[Event]) -> EventOrderError? {
           denial_complete = true
         }
       }
+      // A message type the two ends agreed on privately; the spec's ordering
+      // rules say nothing about it, so it neither breaks nor advances the stream.
+      Other(..) => ()
       _ => return Some(NonResponseEvent)
     }
   }
@@ -249,6 +314,9 @@ pub fn validate_lifespan_replies(events : Array[Event]) -> EventOrderError? {
         }
         shutdown_replied = true
       }
+      // A message type the two ends agreed on privately; the spec's ordering
+      // rules say nothing about it, so it neither breaks nor advances the stream.
+      Other(..) => ()
       _ => return Some(NonResponseEvent)
     }
   }
@@ -268,5 +336,22 @@ pub fn validate_events(
     Http(_) => validate_http_response(events)
     WebSocket(_) => validate_ws_response(events)
     Lifespan(_) => validate_lifespan_replies(events)
+  }
+}
+
+///|
+/// Check an inbound event an application is about to act on. ASGI requires exactly
+/// one of `bytes` or `text` to be set on a `websocket.receive`, and a frame that sets
+/// neither, or both, is a server bug the application should not have to guess about.
+/// Returns `None` for a well-formed event.
+pub fn validate_inbound(event : Event) -> EventOrderError? {
+  match event {
+    WebSocketReceive(text~, bytes~) =>
+      match (text, bytes) {
+        (None, None) => Some(NonResponseEvent)
+        (Some(_), Some(_)) => Some(NonResponseEvent)
+        _ => None
+      }
+    _ => None
   }
 }

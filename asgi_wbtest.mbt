@@ -228,7 +228,7 @@ test "SEAM scope and event variants construct" {
     Event::WebSocketSendText("hi"),
     Event::WebSocketSendBytes(b"hi"),
     Event::WebSocketClose(code=1000, reason=""),
-    Event::WebSocketHttpResponseStart(status=403, headers=[]),
+    Event::WebSocketHttpResponseStart(status=403, headers=[], trailers=false),
     Event::WebSocketHttpResponseBody(body=b"denied", more_body=false),
     Event::LifespanStartup,
     Event::LifespanShutdown,

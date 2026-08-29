@@ -27,10 +27,11 @@ pub fn AsgiVersion::default() -> AsgiVersion {
 }
 
 ///|
-/// The HTTP handshake: protocol `3.0`, HTTP sub-spec `2.5`. This is the revision
-/// that carries `state`, the extension message set (`http.response.trailers` /
-/// `http.response.push` / `http.response.pathsend` / `http.response.early_hint`),
-/// and the `raw_path` guarantee.
+/// The HTTP handshake: protocol `3.0`, HTTP sub-spec `2.5` — the www sub-spec's
+/// current revision, whose own history runs 2.1 websocket accept `headers`, 2.2 a
+/// `None` server port, 2.3 a websocket close `reason`, 2.4 `send()` raising on a
+/// closed connection, 2.5 a websocket disconnect `reason`. Of those, 2.4 is the one
+/// this seam cannot express: see the note in the README.
 pub fn AsgiVersion::http() -> AsgiVersion {
   { version: "3.0", spec_version: "2.5", }
 }
@@ -111,6 +112,10 @@ pub(all) struct Extensions {
   http_response_early_hint : Bool
   http_response_debug : Bool
   websocket_http_response : Bool
+  // Extensions the spec does not name. An extension is "a Unicode string name
+  // agreed upon between servers and applications", so the set cannot be closed:
+  // a server advertises its own here and an application looks it up by name.
+  custom : Map[String, Json]
 } derive(Eq)
 
 ///|
@@ -126,7 +131,32 @@ pub fn Extensions::none() -> Extensions {
     http_response_early_hint: false,
     http_response_debug: false,
     websocket_http_response: false,
+    custom: Map([]),
   }
+}
+
+///|
+/// Advertise an extension this seam does not name, with whatever value the server
+/// wants to hand the application (the spec's own `http.fullflush` example carries an
+/// empty object).
+pub fn Extensions::enable(
+  self : Extensions,
+  name : String,
+  value? : Json = Json::object(Map([])),
+) -> Extensions {
+  let custom = Map([])
+  for k, v in self.custom {
+    custom[k] = v
+  }
+  custom[name] = value
+  { ..self, custom, }
+}
+
+///|
+/// What the server advertised for `name`, or `None` if it did not. Only the
+/// extensions this seam has no field for; the named ones are the `Bool`s above.
+pub fn Extensions::get(self : Extensions, name : String) -> Json? {
+  self.custom.get(name)
 }
 
 ///|
@@ -379,7 +409,11 @@ pub(all) enum Event {
   WebSocketClose(code~ : Int, reason~ : String)
   // `websocket.http.response` extension: deny the handshake with a real HTTP
   // response instead of a bare close (start + body, mirroring the http path).
-  WebSocketHttpResponseStart(status~ : Int, headers~ : Array[(String, String)])
+  WebSocketHttpResponseStart(
+    status~ : Int,
+    headers~ : Array[(String, String)],
+    trailers~ : Bool
+  )
   WebSocketHttpResponseBody(body~ : Bytes, more_body~ : Bool)
   LifespanStartup
   LifespanShutdown
@@ -387,6 +421,10 @@ pub(all) enum Event {
   LifespanStartupFailed(message~ : String)
   LifespanShutdownComplete
   LifespanShutdownFailed(message~ : String)
+  // A message type this seam does not name. The spec lets a server and an
+  // application agree on their own — "users are free to invent their own message
+  // types", e.g. `mychat.message` — so neither direction can be a closed set.
+  Other(type_~ : String, payload~ : Json)
 } derive(Eq)
 
 ///|

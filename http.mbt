@@ -170,9 +170,20 @@ pub fn Response::json(status? : Int = 200, value : Json) -> Response {
 }
 
 ///|
+/// Why a body drain stopped: the request body finished, the client went away
+/// mid-request, or the stream ran out without either. A long-polling or streaming
+/// handler cares about the difference — `Disconnected` means nothing it sends will
+/// arrive, so cleanup is all that is left to do.
+pub(all) enum Drain {
+  Complete
+  Disconnected
+  Truncated
+} derive(Eq, Debug)
+
+///|
 /// Fold one inbound event into the body buffer, returning whether more chunks
 /// should be pulled. `HttpRequest` appends its bytes and continues while
-/// `more_body`; any other event (a disconnect, a stray frame) ends the drain.
+/// `more_body`; a disconnect or a stray frame ends the drain.
 /// Shared by the async `to_asgi` loop and the synchronous `run_http` driver so
 /// both drain identically.
 fn absorb(buf : Buffer, event : Event) -> Bool {
@@ -183,6 +194,20 @@ fn absorb(buf : Buffer, event : Event) -> Bool {
     }
     _ => false
   }
+}
+
+///|
+/// Drain a body out of `inbound`, reporting why it stopped.
+fn drain_body_events(buf : Buffer, inbound : Array[Event]) -> Drain {
+  for event in inbound {
+    if event is HttpDisconnect {
+      return Disconnected
+    }
+    if !absorb(buf, event) {
+      return Complete
+    }
+  }
+  Truncated
 }
 
 ///|
@@ -230,12 +255,29 @@ pub fn run_http_scoped(
   match scope {
     Http(hs) => {
       let buf = Buffer()
-      for event in inbound {
-        if !absorb(buf, event) {
-          break
-        }
-      }
+      let _ = drain_body_events(buf, inbound)
       app(hs, buf.to_bytes())
+    }
+    _ => []
+  }
+}
+
+///|
+/// `run_http_scoped`, but the app also learns why the body drain stopped. A handler
+/// that holds a connection open — long polling, a slow upload — needs to tell "the
+/// client sent everything" from "the client went away", which the plain form cannot:
+/// it runs the handler to completion either way and the response goes nowhere.
+/// Non-http scopes yield `[]`.
+pub fn run_http_scoped_drain(
+  app : (HttpScope, Bytes, Drain) -> Array[Event],
+  scope : Scope,
+  inbound : Array[Event],
+) -> Array[Event] {
+  match scope {
+    Http(hs) => {
+      let buf = Buffer()
+      let why = drain_body_events(buf, inbound)
+      app(hs, buf.to_bytes(), why)
     }
     _ => []
   }

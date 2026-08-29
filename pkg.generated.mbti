@@ -1,6 +1,10 @@
 // Generated using `moon info`, DON'T EDIT IT
 package "Lfan-ke/moonasgi"
 
+import {
+  "moonbitlang/core/debug",
+}
+
 // Values
 pub fn compose(Array[((Request) -> Response) -> (Request) -> Response], (Request) -> Response) -> (Request) -> Response
 
@@ -16,6 +20,8 @@ pub fn latin1_decode(Bytes) -> String
 
 pub fn latin1_encode(String) -> Bytes
 
+pub fn percent_decode(String) -> Bytes
+
 pub fn run_conformance() -> ConformanceReport
 
 pub fn run_http((Request) -> Response, Scope, Array[Event]) -> Array[Event]
@@ -23,6 +29,8 @@ pub fn run_http((Request) -> Response, Scope, Array[Event]) -> Array[Event]
 pub fn run_http_app((Request) -> Array[Event], Scope, Array[Event]) -> Array[Event]
 
 pub fn run_http_scoped((HttpScope, Bytes) -> Array[Event], Scope, Array[Event]) -> Array[Event]
+
+pub fn run_http_scoped_drain((HttpScope, Bytes, Drain) -> Array[Event], Scope, Array[Event]) -> Array[Event]
 
 pub fn run_http_stream((Request) -> StreamingResponse, Scope, Array[Event]) -> Array[Event]
 
@@ -35,6 +43,8 @@ pub fn to_asgi((Request) -> Response) -> async (Scope, async () -> Event, async 
 pub fn validate_events(Scope, Array[Event]) -> EventOrderError?
 
 pub fn validate_http_response(Array[Event]) -> EventOrderError?
+
+pub fn validate_inbound(Event) -> EventOrderError?
 
 pub fn validate_lifespan_replies(Array[Event]) -> EventOrderError?
 
@@ -69,6 +79,12 @@ pub(all) struct ConformanceReport {
 } derive(Eq)
 pub fn ConformanceReport::ok(Self) -> Bool
 
+pub(all) enum Drain {
+  Complete
+  Disconnected
+  Truncated
+} derive(Eq, @debug.Debug)
+
 pub(all) enum Event {
   HttpRequest(body~ : Bytes, more_body~ : Bool)
   HttpDisconnect
@@ -87,7 +103,7 @@ pub(all) enum Event {
   WebSocketSendText(String)
   WebSocketSendBytes(Bytes)
   WebSocketClose(code~ : Int, reason~ : String)
-  WebSocketHttpResponseStart(status~ : Int, headers~ : Array[(String, String)])
+  WebSocketHttpResponseStart(status~ : Int, headers~ : Array[(String, String)], trailers~ : Bool)
   WebSocketHttpResponseBody(body~ : Bytes, more_body~ : Bool)
   LifespanStartup
   LifespanShutdown
@@ -95,6 +111,7 @@ pub(all) enum Event {
   LifespanStartupFailed(message~ : String)
   LifespanShutdownComplete
   LifespanShutdownFailed(message~ : String)
+  Other(type_~ : String, payload~ : Json)
 } derive(Eq)
 
 pub(all) enum EventOrderError {
@@ -108,6 +125,11 @@ pub(all) enum EventOrderError {
   IncompleteBody
   MissingTrailers
   EventAfterComplete
+  DebugAfterStart
+  DuplicateDebug
+  PushBeforeStart
+  PathSendMixedWithBody
+  IllegalResponseHeader
   FrameBeforeAccept
   DuplicateAccept
   EventAfterClose
@@ -131,7 +153,9 @@ pub(all) struct Extensions {
   http_response_early_hint : Bool
   http_response_debug : Bool
   websocket_http_response : Bool
+  custom : Map[String, Json]
 } derive(Eq)
+pub fn Extensions::enable(Self, String, value? : Json) -> Self
 pub fn Extensions::enable_debug(Self) -> Self
 pub fn Extensions::enable_early_hint(Self) -> Self
 pub fn Extensions::enable_pathsend(Self) -> Self
@@ -139,6 +163,7 @@ pub fn Extensions::enable_push(Self) -> Self
 pub fn Extensions::enable_trailers(Self) -> Self
 pub fn Extensions::enable_websocket_http_response(Self) -> Self
 pub fn Extensions::enable_zerocopysend(Self) -> Self
+pub fn Extensions::get(Self, String) -> Json?
 pub fn Extensions::none() -> Self
 pub fn Extensions::with_tls(Self, TlsExtension) -> Self
 
