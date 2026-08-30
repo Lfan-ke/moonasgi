@@ -788,6 +788,85 @@ pub fn run_conformance() -> ConformanceReport {
     "legacy/matches-single",
     legacy_out == run_http(legacy_handler, legacy_scope, legacy_inbound),
   )
+  // NOTE on what is *not* here: `to_asgi` and `guarantee_single_callable` produce
+  //    an async callable, and this package has no runtime to drive one — that is the
+  //    whole point of the seam. Their coverage lives in `mooncat`, which has the
+  //    runtime; here only the synchronous cores they lift can be checked.
+
+  // P. middleware composition: the first registered is the outermost, so it sees
+  //    the request first and the response last.
+  let trace : Array[String] = []
+  let outer : Middleware = next => {
+    req => {
+      trace.push("outer-in")
+      let resp = next(req)
+      trace.push("outer-out")
+      resp
+    }
+  }
+  let inner : Middleware = next => {
+    req => {
+      trace.push("inner-in")
+      next(req)
+    }
+  }
+  let composed = compose([outer, inner], fn(_r) { Response::text("body") })
+  let composed_out = composed({
+    http_method: "GET",
+    path: "/c",
+    query_string: b"",
+    headers: [],
+    body: b"",
+  })
+  check("middleware/order", trace == ["outer-in", "inner-in", "outer-out"])
+  check("middleware/response", composed_out.status == 200)
+
+  // R. subprotocol selection: the server picks the client's first offer it knows,
+  //    in the client's order of preference, and `None` when there is no overlap.
+  let ws_offer = WebSocketScope::new(path="/ws", subprotocols=[
+    "graphql-transport-ws", "graphql-ws",
+  ])
+  check(
+    "ws/subprotocol-picks-client-preference",
+    ws_offer.select_subprotocol(["graphql-ws", "graphql-transport-ws"]) ==
+    Some("graphql-transport-ws"),
+  )
+  check(
+    "ws/subprotocol-none-on-no-overlap",
+    ws_offer.select_subprotocol(["mqtt"]) is None,
+  )
+
+  // S. the tls extension: a named spec extension with zero coverage until now.
+  let tls : TlsExtension = {
+    server_cert: Some("-----BEGIN CERTIFICATE-----"),
+    client_cert_chain: ["a", "b"],
+    client_cert_name: Some("CN=heke1228"),
+    client_cert_error: None,
+    tls_version: Some(0x0304),
+    cipher_suite: Some(0x1301),
+  }
+  let with_tls = Extensions::none().with_tls(tls)
+  check("tls/round-trips", with_tls.tls == Some(tls))
+  check("tls/absent-by-default", Extensions::none().tls is None)
+
+  // T. streaming responses: `run_http_stream` lowers a StreamingResponse the same
+  //    way `run_http` lowers a Response.
+  let stream_scope = Http(HttpScope::new(http_method="GET", path="/stream"))
+  let streamed = run_http_stream(
+    fn(_req) {
+      StreamingResponse::new(status=200, headers=[("x-stream", "1")], chunks=[
+        b"one", b"two",
+      ])
+    },
+    stream_scope,
+    [HttpRequest(body=b"", more_body=false)],
+  )
+  check("stream/emits-start-and-chunks", streamed.length() >= 3)
+  check(
+    "stream/terminates-once",
+    streamed[streamed.length() - 1] is HttpResponseBody(more_body=false, ..),
+  )
+
   let failures : Array[String] = []
   for r in results {
     if !r.1 {
